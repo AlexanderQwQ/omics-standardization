@@ -1,0 +1,61 @@
+# Data files (large)
+data/raw/*
+data/processed/*
+data/metadata/*
+!data/raw/.gitkeep
+!data/processed/adata/.gitkeep
+!data/processed/parquet/.gitkeep
+!data/processed/reports/.gitkeep
+!data/metadata/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# Outputs
+outputs/*
+!outputs/.gitkeep
+
+# Test coverage
+htmlcov/
+.coverage
+coverage.xml
+.pytest_cache/
+
+# Model files (trained models for selectors)
+config/models/*
+!config/models/.gitkeep
+
+# Temp
+tmp/
+*.tmp

@@ -1,0 +1,116 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "omics_standardization"
+description =  "多模态空间环境免疫组学数据标准化处理模块"
+readme = "README.md"
+license = "BSD-3-Clause"
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Framework :: Jupyter",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Natural Language :: Chinese (Simplified)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dynamic = ["version"]
+dependencies = [
+    "anndata>=0.10",
+    "scanpy>=1.9",
+    "muon>=0.1",
+    "mudata>=0.2",
+    "numpy>=1.21",
+    "pandas>=1.5",
+    "scipy>=1.9",
+    "scikit-learn>=1.1",
+    "matplotlib>=3.7",
+    "seaborn>=0.12",
+    "pyyaml>=6.0",
+    "tqdm",
+    "h5py>=3.8",
+    "joblib",
+    "numba",
+    "pydantic>=2.0",
+    "rich",
+]
+
+[project.optional-dependencies]
+torch = ["torch>=1.13"]
+rpy2 = ["rpy2>=3.5"]
+docs = [
+    "sphinx>=6.0",
+    "myst-nb>=1.0",
+    "sphinx-book-theme>=1.0",
+    "nbsphinx",
+    "ipykernel",
+]
+test = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "pytest-mock",
+]
+dev = [
+    "ruff",
+    "pre-commit",
+]
+
+[project.urls]
+Homepage = "https://github.com/example/omics_standardization"
+Documentation = "https://omics-standardization.readthedocs.io"
+Source = "https://github.com/example/omics_standardization"
+
+[project.scripts]
+omics-std = "src.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.hatch.version]
+path = "src/_version.py"
+
+[tool.ruff]
+src = ["src"]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "B",      # bugbear
+    "C4",     # comprehensions
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # naming
+    "PL",     # pylint
+    "RUF",    # ruff-specific
+    "SIM",    # simplify
+    "UP",     # pyupgrade
+    "W",      # pycodestyle warnings
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "PLR0913", # too many arguments
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = ["-v", "--tb=short"]

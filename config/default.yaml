@@ -1,0 +1,128 @@
+# =============================================================================
+# omics_standardization 默认配置文件
+# =============================================================================
+# 所有可调参数集中管理于此文件。
+# 命令行参数优先于本文件中的设置。
+
+# -----------------------------------------------------------------------------
+# 模态配置
+# -----------------------------------------------------------------------------
+modalities:
+  # 启用的数据模态列表
+  enabled:
+    - scrna         # 单细胞转录组
+    - bulk_rna      # 散装转录组
+    - proteomics    # 蛋白质组（流式/质谱）
+    - metabolomics  # 代谢组
+    - atac          # 染色质可及性
+  # 默认模态（当无法自动检测时使用）
+  default: scrna
+
+# -----------------------------------------------------------------------------
+# 缺失值插补策略
+# -----------------------------------------------------------------------------
+imputation:
+  # 方法：auto（自动选择）| missforest | zinb_vae | magic | none（跳过）
+  method: auto
+  # 触发插补的缺失率阈值（缺失率 > 该值则触发插补）
+  missing_threshold: 0.1
+  # MissForest 参数
+  missforest:
+    n_estimators: 100
+    max_iter: 10
+    random_state: 42
+  # ZINB-VAE 参数
+  zinb_vae:
+    n_epochs: 200
+    batch_size: 128
+    latent_dim: 32
+    learning_rate: 0.001
+  # MAGIC 参数
+  magic:
+    t: 3           # 扩散步数
+    k: 30          # 近邻数
+    k_a: 10        # 自适应近邻
+
+# -----------------------------------------------------------------------------
+# 尺度归一化策略
+# -----------------------------------------------------------------------------
+normalization:
+  # 方法：auto（自动选择）| tmm | deseq2 | scran | quantile | vsn | none
+  method: auto
+  # 是否进行 log1p 变换
+  log_transform: true
+  # 是否进行 scale（零均值单位方差）
+  scale: true
+  # Scran 参数
+  scran:
+    min_mean: 1e-3
+  # TMM 参数
+  tmm:
+    ref_column: null  # 自动选择
+
+# -----------------------------------------------------------------------------
+# 批次效应校正策略
+# -----------------------------------------------------------------------------
+batch_correction:
+  # 方法：auto（自动选择）| combat | harmony | dann | none（跳过）
+  method: auto
+  # 批次标签所在 .obs 列名
+  batch_key: batch
+  # 需要保留的生物学变异（covariates，可选）
+  covariates: []
+  # ComBat 参数
+  combat:
+    parametric: true
+  # Harmony 参数
+  harmony:
+    max_iter_harmony: 10
+    theta: 2.0
+  # DANN 参数
+  dann:
+    n_epochs: 100
+    batch_size: 64
+    learning_rate: 0.001
+    lambda_adv: 1.0
+
+# -----------------------------------------------------------------------------
+# 算法选择器配置
+# -----------------------------------------------------------------------------
+selector:
+  # 模态识别模型：gmm（高斯混合模型）
+  modality_model: gmm
+  # 策略推荐模型：random_forest
+  strategy_model: random_forest
+  # 训练好的模型存放目录
+  model_dir: config/models
+  # GMM 参数
+  gmm:
+    n_components: 5
+    covariance_type: full
+    random_state: 42
+  # RandomForest 参数
+  random_forest:
+    n_estimators: 200
+    max_depth: 10
+    random_state: 42
+
+# -----------------------------------------------------------------------------
+# 日志配置
+# -----------------------------------------------------------------------------
+logging:
+  # 日志级别：error | warning | info | hint | debug
+  level: info
+  # 是否写入日志文件
+  to_file: true
+  # 日志文件输出目录
+  log_dir: logs
+
+# -----------------------------------------------------------------------------
+# 输出配置
+# -----------------------------------------------------------------------------
+output:
+  # 输出格式：h5mu | h5ad | parquet
+  format: h5mu
+  # 是否压缩
+  compress: true
+  # 是否生成质量报告
+  save_reports: true
