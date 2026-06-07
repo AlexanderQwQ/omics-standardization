@@ -7,7 +7,7 @@
 
 import logging
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging import CRITICAL, DEBUG, ERROR, INFO, WARNING
 
 # 在 INFO 和 DEBUG 之间插入 HINT 级别
@@ -34,7 +34,7 @@ class _RootLogger(logging.RootLogger):
     ) -> datetime:
         from ._settings import settings
 
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         time_passed: timedelta | None = None if time is None else now - time
         extra = {
             **(extra or {}),

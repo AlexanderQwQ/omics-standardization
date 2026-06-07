@@ -64,9 +64,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/example/omics_standardization"
+Homepage = "https://github.com/AlexanderQwQ/omics-standardization"
 Documentation = "https://omics-standardization.readthedocs.io"
-Source = "https://github.com/example/omics_standardization"
+Source = "https://github.com/AlexanderQwQ/omics-standardization"
 
 [project.scripts]
 omics-std = "src.main:main"

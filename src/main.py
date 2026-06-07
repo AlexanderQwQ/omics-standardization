@@ -49,12 +49,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # 加载配置
-    from ._settings import settings
+    from ._settings import Verbosity, settings
 
     settings.load_config(args.config)
 
     if args.verbose:
-        settings.verbosity = settings._verbosity_type("debug")
+        settings.verbosity = Verbosity.debug
 
     # 运行流水线
     from .pipeline import StandardizationPipeline
