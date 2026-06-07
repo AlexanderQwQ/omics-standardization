@@ -117,6 +117,46 @@ logging:
   log_dir: logs
 
 # -----------------------------------------------------------------------------
+# 混合存储配置 (MinIO + 关系型数据库 + 图数据库)
+# -----------------------------------------------------------------------------
+storage:
+  # MinIO 对象存储（大型文件: AnnData, FASTQ, BAM, 报告）
+  minio:
+    endpoint: localhost:9000
+    access_key: minioadmin
+    secret_key: minioadmin
+    bucket: omics-data
+    secure: false
+    # 本地文件系统 fallback 目录
+    fallback_dir: data/storage/objects
+    # 生命周期策略
+    lifecycle:
+      enabled: false
+      expiry_days: 90
+
+  # 关系型数据库（样本元数据、处理参数、质量指标）
+  relational:
+    # 数据库方言: sqlite | dm8
+    dialect: sqlite
+    # SQLite 数据库路径
+    database: data/storage/metadata.db
+    # DM8 连接参数（仅 dialect=dm8 时使用）
+    # host: localhost
+    # port: 5236
+    # user: SYSDBA
+    # password: ""
+
+  # 图数据库（样本间关系、知识图谱）
+  graph:
+    # Neo4j 连接 URI
+    uri: bolt://localhost:7687
+    user: neo4j
+    password: neo4j
+    database: omics
+    # 本地 JSON-LD fallback 目录
+    fallback_dir: data/storage/graph
+
+# -----------------------------------------------------------------------------
 # 输出配置
 # -----------------------------------------------------------------------------
 output:

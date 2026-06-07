@@ -140,6 +140,8 @@ class StrategySelector:
 def recommend_strategy(adata: AnnData, modality: str | None = None) -> dict[str, str]:
     """便捷函数：推荐单个 AnnData 的最优处理策略
 
+    优先使用已训练的 RF 模型，否则使用 fallback 策略表。
+
     Args:
         adata: 输入数据
         modality: 已知模态（None 则自动检测）
@@ -152,4 +154,15 @@ def recommend_strategy(adata: AnnData, modality: str | None = None) -> dict[str,
         modality = detect_modality(adata)
 
     selector = StrategySelector()
+
+    # 尝试加载持久化模型
+    from ._persistence import load_strategy_models
+
+    persisted = load_strategy_models()
+    if all(m is not None for m in persisted.values()):
+        selector._models = persisted
+        logg.info("使用已训练的 RF 模型进行策略推荐")
+        return selector.predict(modality, adata)
+
+    # 未训练模型时使用 fallback
     return selector._fallback(modality)

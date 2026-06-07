@@ -29,9 +29,11 @@ def list_supported_files(
     if patterns is None:
         patterns = (
             ".h5ad", ".h5mu", ".loom", ".mtx", ".mtx.gz",
+            ".csv", ".csv.gz", ".tsv", ".tsv.gz", ".txt", ".txt.gz",
             ".fcs", ".mzml", ".mzml.gz",
             ".fastq", ".fastq.gz", ".fq", ".fq.gz",
             ".bam", ".sam",
+            ".biom", ".biom.gz",
         )
 
     directory = Path(directory)

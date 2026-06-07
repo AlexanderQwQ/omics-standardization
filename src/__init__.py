@@ -19,6 +19,9 @@ from . import parsers
 # Selectors
 from . import selectors
 
+# Storage (lazy — drivers loaded on demand)
+from . import storage
+
 __all__ = [
     "__version__",
     "Verbosity",
@@ -28,5 +31,6 @@ __all__ = [
     "pl",
     "parsers",
     "selectors",
+    "storage",
     "StandardizationPipeline",
 ]

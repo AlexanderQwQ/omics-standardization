@@ -35,6 +35,14 @@ _EXTENSION_MAP: dict[str, str] = {
     ".fq.gz": "fastq",
     ".bam": "fastq",
     ".sam": "fastq",
+    ".csv": "csv",
+    ".csv.gz": "csv",
+    ".tsv": "csv",
+    ".tsv.gz": "csv",
+    ".txt": "csv",
+    ".txt.gz": "csv",
+    ".biom": "biom",
+    ".biom.gz": "biom",
 }
 
 
@@ -103,6 +111,8 @@ def parse_file(path: str | Path) -> AnnData:
         "fcs": FCSParser,
         "mzml": MzMLParser,
         "fastq": FASTQParser,
+        "csv": CSVParser,
+        "biom": BIOMParser,
     }
 
     parser_cls = parser_map[parser_type]
@@ -115,3 +125,5 @@ from ._h5ad import H5ADParser  # noqa: E402, F811
 from ._fcs import FCSParser  # noqa: E402
 from ._mzml import MzMLParser  # noqa: E402
 from ._fastq import FASTQParser  # noqa: E402
+from ._csv import CSVParser  # noqa: E402
+from ._biom import BIOMParser  # noqa: E402

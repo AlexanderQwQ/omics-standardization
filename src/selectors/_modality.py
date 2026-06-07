@@ -88,12 +88,27 @@ class ModalitySelector:
 def detect_modality(adata: AnnData) -> str:
     """便捷函数：自动检测 AnnData 的模态类型
 
-    使用启发式规则（无训练模型时）:
+    优先使用已训练的 GMM 模型，否则使用启发式规则:
         - 特征数 > 10000 → scrna
-        - 特征数 < 1000 且零膨胀率高 → proteomics
+        - 特征数 < 1000 且零膨胀率低 → proteomics
+        - 特征数 < 500 → metabolomics
         - 特征数适中 → bulk_rna
     """
     features = _extract_features(adata)
+
+    # 尝试使用持久化的 GMM 模型
+    from ._persistence import load_modality_model
+
+    gmm = load_modality_model()
+    if gmm is not None:
+        # 用 GMM 预测（仅使用数值特征，去掉特征维度的独占特征）
+        # GMM 在 [missing_rate, mean_val, var_val, zero_inflation, cell_count_log, n_vars] 上训练
+        cluster = gmm.predict(features)[0]
+        modality = MODALITY_LABELS[cluster % len(MODALITY_LABELS)]
+        logg.info(f"GMM 模态检测: {modality} (cluster={cluster})")
+        return modality
+
+    # 启发式 fallback
     n_vars = features[0, 5]
     zero_inf = features[0, 3]
 

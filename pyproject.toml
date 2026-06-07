@@ -46,6 +46,16 @@ dependencies = [
 [project.optional-dependencies]
 torch = ["torch>=1.13"]
 rpy2 = ["rpy2>=3.5"]
+fcs = ["fcsparser>=0.2"]
+ms = ["pymzml>=2.5"]
+impute = ["magic-impute>=3.0"]
+ngs = ["pysam>=0.22"]
+microbiome = ["biom-format>=2.1"]
+storage = [
+    "minio>=7.2",
+    "neo4j>=5.20",
+    "dmPython>=8.0; platform_system == 'Windows'",
+]
 docs = [
     "sphinx>=6.0",
     "myst-nb>=1.0",
