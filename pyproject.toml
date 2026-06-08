@@ -38,13 +38,13 @@ dependencies = [
     "tqdm",
     "h5py>=3.8",
     "joblib",
-    "numba",
+    "numba>=0.57",
     "pydantic>=2.0",
     "rich",
 ]
 
 [project.optional-dependencies]
-torch = ["torch>=1.13"]
+torch = ["torch>=1.13", "scvi-tools>=1.0"]
 rpy2 = ["rpy2>=3.5"]
 fcs = ["fcsparser>=0.2"]
 ms = ["pymzml>=2.5"]

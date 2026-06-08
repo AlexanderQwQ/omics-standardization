@@ -2,12 +2,32 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Environment Setup
+
+**Recommended: conda (one-shot, includes R + kallisto + CUDA PyTorch)**
+
+```bash
+conda env create -f environment.yml     # create full environment
+conda activate omics-std                # activate
+pip install -e ".[test,dev]"            # install project in editable mode
+```
+
+**Alternative: pip + venv (Python packages only, no R/kallisto)**
+
+```bash
+python -m venv .venv && source .venv/bin/activate   # or .venv\Scripts\activate on Windows
+pip install -r requirements.txt                      # install all Python deps
+pip install -e ".[test,dev]"                         # editable install
+```
+
+System-level prerequisites for pip users (see `requirements.txt` header for details):
+- R + Bioconductor packages (`edgeR`, `DESeq2`, `limma`, `scran`) for TMM/DESeq2/VSN/Scran
+- `kallisto` on PATH for FASTQ paired-end quantification
+- DM8 database client (Windows only, optional — SQLite is the default)
+
 ## Build, Lint, and Test
 
 ```bash
-# Install in editable mode with all extras
-pip install -e ".[dev,test,torch,rpy2,fcs,ms,impute,ngs,microbiome,storage]"
-
 # Lint
 ruff check src/ tests/
 ruff format src/ tests/              # auto-format
@@ -144,8 +164,13 @@ The exception is DANN's `GradientReversalLayer` class definition, which is guard
 - ✅ `str | None` syntax is safe (PEP 604, present since 3.10)
 - ✅ `from __future__ import annotations` is already in every source file (makes annotations lazy strings)
 
+Also watch for version-constrained dependencies:
+- `numba>=0.57` is required (numba < 0.57 doesn't support Python 3.11; < 0.59 doesn't support 3.12). Without this pin, `pip` may resolve an incompatible numba on Python ≥ 3.11.
+
 ### Known Gotchas
 
+- **Environment files**: `requirements.txt` (pip) and `environment.yml` (conda) are the authoritative dependency lists. `pyproject.toml` mirrors them but the env files include system-level notes (R, kallisto, DM8). When adding a new dependency, update all three.
+- **`scvi-tools` is in the `torch` optional group**: ZINB-VAE's scvi mode imports `scvi`. It was missing from early `pyproject.toml` — added now. If you see `ImportError: scvi`, install with `pip install -e ".[torch]"`.
 - **`src/__init__.py` imports all submodules eagerly** at package load time — including `storage`, `parsers`, and `selectors`. Adding a new submodule import there means it runs on every `import` of the package. Keep top-level imports lean. Note that `storage._minio`, `storage._graph`, etc. are NOT imported at package level — only `storage` (the namespace) is.
 - **`pp.normalize()` bypasses its own selector**: unlike `pp.impute()` and `pp.batch_correct()` which use their own module-level selectors, `normalize()` calls the global `recommend_strategy()` from selectors. This is intentional — the normalization selector depends on the detected modality.
 - **Method map in `pp.normalize()`**: the function maps method strings to class names via a hardcoded `method_map` dict. Adding a new normalizer requires updating both `normalizers/__init__.py` (export) and this dict (string→class mapping).
