@@ -21,7 +21,7 @@ class TestModalityDetection:
 
     def test_extract_features(self, small_adata) -> None:
         features = _extract_features(small_adata)
-        assert features.shape == (1, 6)
+        assert features.shape == (1, 4)
         assert features[0, 0] >= 0  # missing rate >= 0
 
     def test_detect_scrna(self, small_adata) -> None:
@@ -32,8 +32,8 @@ class TestModalityDetection:
     def test_gmm_fit_and_predict(self, small_adata) -> None:
         """GMM 应在小数据集上正常训练和预测"""
         features = _extract_features(small_adata)
-        # 需要至少 2 个样本来训练 GMM
-        X_train = np.repeat(features, 10, axis=0) + np.random.RandomState(42).normal(0, 0.1, (10, 6))
+        # 需要至少 2 个样本来训练 GMM（复制并加噪声）
+        X_train = np.repeat(features, 10, axis=0) + np.random.RandomState(42).normal(0, 0.1, (10, 4))
 
         selector = ModalitySelector(n_components=min(3, len(X_train)))
         selector.fit(X_train)

@@ -242,7 +242,6 @@ class DANCorrector:
             X_corrected = encoder(X_tensor).numpy()
 
         adata.obsm["X_corrected"] = X_corrected.astype(np.float32)
-        adata.obsm["X_dann_latent"] = latent_dim
         adata.uns["standardization"] = adata.uns.get("standardization", {})
         adata.uns["standardization"]["batch_correction"] = {
             "method": "dann",

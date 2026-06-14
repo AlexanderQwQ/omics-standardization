@@ -44,7 +44,7 @@ class ComBatCorrector:
             # 尝试使用 scanpy 内置的 combat
             import scanpy as sc
             adata_copy = adata.copy()
-            sc.pp.combat(adata_copy, key=batch_key)
+            sc.pp.combat(adata_copy, key=batch_key, parametric=self.parametric)
             X_corrected = adata_copy.X.toarray() if hasattr(adata_copy.X, "toarray") else adata_copy.X
         except Exception:
             logg.warning("scanpy combat 失败，使用简化实现")

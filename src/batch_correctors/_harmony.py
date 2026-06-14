@@ -49,8 +49,11 @@ class HarmonyCorrector:
                 max_iter_harmony=self.max_iter_harmony,
             )
         except Exception:
-            logg.warning("scanpy harmony_integrate 失败，使用简化实现")
-            # Fallback: 不做任何处理
+            logg.warning(
+                "scanpy harmony_integrate 不可用，回退到数据直通模式。"
+                "批次效应未被校正！请安装 scanpy[leiden] 以获得完整 Harmony 功能。"
+            )
+            # Fallback: 不做任何校正，直接复制 PCA 或原始数据
             if "X_pca" in adata.obsm:
                 adata.obsm["X_corrected"] = adata.obsm["X_pca"].copy()
             else:

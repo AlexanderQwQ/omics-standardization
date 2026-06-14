@@ -39,6 +39,11 @@ class MAGICImputer:
 
         Returns:
             插补后的 AnnData
+
+        Warning:
+            MAGIC 基于图扩散原理，在高度异质性的混合样本（如 .fcs 流式数据）
+            上容易触发过度平滑，抹除局部特异性变异。对于此类数据，建议使用
+            MissForest（中等缺失率）或 ZINB-VAE（高缺失率）。
         """
         try:
             import magic
@@ -48,6 +53,17 @@ class MAGICImputer:
             )
 
         X = adata.X.toarray() if hasattr(adata.X, "toarray") else adata.X
+
+        # 检测高异质性风险：特征数少 + 高零率 → 可能是流式/质谱数据
+        n_obs, n_vars = adata.shape
+        zero_rate = float(np.mean(X == 0))
+        if n_vars < 200 and zero_rate > 0.3:
+            logg.warning(
+                f"MAGIC 过平滑风险警告: 低维特征 (n_vars={n_vars}) + "
+                f"高缺失率 (zero_rate={zero_rate:.3f})。"
+                f"此类数据（如 .fcs 流式细胞术）在图扩散中极易触发过度平滑，"
+                f"建议改用 MissForest 或 ZINB-VAE 插补。"
+            )
 
         magic_op = magic.MAGIC(
             t=self.t,
