@@ -25,6 +25,44 @@ System-level prerequisites for pip users (see `requirements.txt` header for deta
 - `kallisto` on PATH for FASTQ paired-end quantification
 - DM8 database client (Windows only, optional — SQLite is the default)
 
+### Windows 注意事项
+
+- **Conda**：必须在 Anaconda Prompt 或 PowerShell（`conda init powershell` 后）中运行，Git Bash 通常无法使用 conda
+- **conda env create 耗时较长**：需下载 R、Bioconductor、PyTorch、kallisto 等 ~2-5 GB 包，建议网络良好时执行
+- **Python 版本**：项目要求 `>=3.10,<3.14`，Windows Store 版 Python 可能版本过新
+- **路径分隔符**：所有配置文件中统一使用正斜杠 `/`
+
+## Demo Data
+
+项目提供两个脚本来生成和使用合成 demo 数据，无需外部数据源即可验证全流程：
+
+```bash
+# 1. 生成所有 5 种模态的合成数据文件 → data/raw/
+python scripts/generate_demo_data.py
+
+# 2. 在 demo 数据上跑全流程验证
+python scripts/run_demo_pipeline.py
+
+# 快速模式（仅解析 + 模态检测，跳过完整 pipeline）
+python scripts/run_demo_pipeline.py --quick
+
+# 单文件验证
+python scripts/run_demo_pipeline.py --file data/raw/scrna/scrna_expression.h5ad
+```
+
+生成的目录结构：
+```
+data/raw/
+├── scrna/          # scRNA-seq: .h5ad + .csv (500 cells × 2000 genes)
+├── bulk_rna/       # Bulk RNA-seq: .csv + .tsv (50 samples × 1000 genes)
+├── proteomics/     # 流式细胞术: .fcs + .csv (100 events × 50 channels)
+├── metabolomics/   # 质谱: .mzML + .csv (80 spectra × 200 peaks)
+├── atac/           # ATAC-seq: .h5ad + .csv (300 cells × 15000 peaks)
+└── microbiome/     # 宏基因组: .biom (30 samples × 500 OTUs)
+```
+
+脚本仅依赖 `numpy`, `pandas`, `scipy`, `anndata`, `h5py`，可在项目包安装前独立运行。
+
 ## Build, Lint, and Test
 
 ```bash
@@ -108,9 +146,9 @@ Custom `_RootLogger` ([src/logging.py](src/logging.py)) with convenience functio
 
 When `config/default.yaml` specifies `method: auto`, the pipeline delegates to the selectors module:
 
-- `selectors/_modality.py`: Heuristic feature extraction → GMM clustering → labels like `"scrna"`, `"proteomics"`, `"bulk_rna"`
-- `selectors/_strategy.py`: Per-modality fallback table mapping modality → `{imputation, normalization, batch}` method
-- `selectors/_persistence.py`: Model training (`train_and_persist_models()`), save/load via joblib, synthetic training data generator (500 samples × 5 modalities). Models stored at `config/models/`.
+- `selectors/_modality.py`: GMM clustering on 4-feature vector `[missing_rate, log1p(n_obs), log1p(n_vars), n_batches]` — **must stay aligned with `generate_training_data()[:, 1:]`** in `_persistence.py`. With trained models, GMM distinguishes all 5 modalities (`scrna`, `bulk_rna`, `proteomics`, `metabolomics`, `atac`). Without models, heuristic rules cover all 5: ATAC is detected when `n_vars > 10000` and `missing_rate > 0.85` (peak/region data with extreme sparsity), scRNA when `n_vars > 10000` and `missing_rate ≤ 0.85`.
+- `selectors/_strategy.py`: Per-modality fallback table mapping modality → `{imputation, normalization, batch}` method. RF model uses 5 features: `[modality_code, missing_rate, log1p(n_obs), log1p(n_vars), n_batches]`.
+- `selectors/_persistence.py`: Model training (`train_and_persist_models()`), save/load via joblib, synthetic training data generator (500 samples × 5 modalities). Models stored at `config/models/`. GMM is trained on `X[:, 1:]` (excluding modality_code).
 
 Both `detect_modality()` and `recommend_strategy()` auto-load persisted models when available; they fall back to heuristics/strategy-table otherwise. Run `train_and_persist_models()` once to bootstrap the model directory.
 
@@ -127,6 +165,7 @@ Each functional module follows the same internal pattern:
 ### Algorithm Details Worth Knowing
 
 - **ZINB-VAE** ([src/imputers/_zinb_vae.py](src/imputers/_zinb_vae.py)): Decoder outputs three ZINB parameters (`pi`/dropout, `mu`/mean, `theta`/dispersion) with proper ZINB negative log-likelihood loss. Two modes: scvi-tools (`use_scvi=True`) or built-in PyTorch. Distinguishes technical dropout (pi < 0.5) from biological zeros.
+- **MAGIC** ([src/imputers/_magic.py](src/imputers/_magic.py)): Wraps `magic-impute` package for KNN-graph Markov diffusion. Includes a heterogeneity guard: warns about over-smoothing risk when `n_vars < 200` and `zero_rate > 0.3` (typical of low-dimensional heterogeneous data like .fcs flow cytometry). For such data, prefer MissForest or ZINB-VAE.
 - **DANN** ([src/batch_correctors/_dann.py](src/batch_correctors/_dann.py)): Uses `torch.autograd.Function`-based `GradientReversalLayer` (standard GRL, not manual gradient flip). Joint training: encoder + decoder (reconstruction) + domain classifier behind GRL. The GRL classes are conditionally defined only when torch is available — the module remains importable without it.
 - **Scran** ([src/normalizers/_scran.py](src/normalizers/_scran.py)): Three-tier fallback — R `scran::computeSumFactors()` via rpy2 → Python-native k-means pooling + linear deconvolution via `scipy.linalg.lstsq` → `scanpy.pp.normalize_total`.
 - **FASTQ** ([src/parsers/_fastq.py](src/parsers/_fastq.py)): Kallisto pseudoalignment via subprocess (`kallisto quant` → parse `abundance.tsv`). Auto-detects paired-end mate files (R1/R2, _1/_2 conventions). Falls back to basic read counting when kallisto is absent.
@@ -147,7 +186,7 @@ Test files (10 total):
 - `test_imputers.py` — imputation selection and MissForest
 - `test_normalizers.py` — TMM, DESeq2, Quantile, VSN, Scran
 - `test_batch_correctors.py` — ComBat, Harmony, correction selector
-- `test_selectors.py` — modality detection, strategy recommendation, model training and persistence
+- `test_selectors.py` — modality detection (GMM + heuristic for all 5 modalities), strategy recommendation (RF + fallback table), model training and persistence. Note: `_extract_features()` returns shape `(1, 4)`.
 - `test_pipeline.py` — end-to-end pipeline, storage integration, metrics
 - `test_storage.py` — MinIO, RelationalDB (SQLite), GraphDB, StorageManager integration
 
@@ -177,6 +216,9 @@ Also watch for version-constrained dependencies:
 - **Storage backends auto-fallback**: `MinIOClient`, `RelationalDBClient`, and `GraphDBClient` all silently fall back to local storage when their drivers are missing. Tests should target the fallback paths (tmpdir-based), not expect live servers.
 - **Selector models directory**: `config/models/` is gitignored except for `.gitkeep`. Models must be regenerated in each environment by calling `train_and_persist_models()`. The `recommend_strategy()` and `detect_modality()` functions check for persisted models and use fallbacks when absent — they never fail on missing model files.
 - **kallisto is called via subprocess** in `FASTQParser._run_kallisto()`. This means it must be on the system PATH, not installed via pip. The parser also creates temp directories (`omics_qc_*`) that must be cleaned up.
+- **GMM feature contract**: `_extract_features()` in `_modality.py` returns 4 features `[missing_rate, log1p(n_obs), log1p(n_vars), n_batches]` — this order and count must match `generate_training_data()[:, 1:]` in `_persistence.py`. Changing either requires updating the other, `detect_modality()`, and `tests/test_selectors.py` shape assertions.
+- **MAGIC over-smoothing**: The `MAGICImputer.run()` method now detects low-dimensional heterogeneous data (`n_vars < 200` and `zero_rate > 0.3`) and emits a warning recommending MissForest or ZINB-VAE instead. This guard targets .fcs flow cytometry data specifically.
+- **Harmony vs ComBat fallback quality gap**: Harmony's fallback (no scanpy) is a **no-op passthrough** — batch effects are silently uncorrected. ComBat's fallback does mean-centering only (no variance adjustment). DANN has no fallback at all (hard-requires PyTorch). When scanpy/torch are unavailable, the corrector silently degrades; check `adata.uns["standardization"]["batch_correction"]["method"]` to confirm what actually ran.
 
 ### Reference Projects
 

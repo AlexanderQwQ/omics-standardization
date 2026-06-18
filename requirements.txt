@@ -1,40 +1,64 @@
 # =============================================================================
-# omics_standardization — Python 依赖列表（一键安装所有依赖）
+# omics_standardization — Environment Setup Guide
 # =============================================================================
-# 安装:
-#   pip install -r requirements.txt
 #
-# ⚠️ 安装前请先完成以下系统级依赖的手动配置（详见下方说明）
+# This file documents the complete dependency list and setup instructions.
+# The PRIMARY way to create the environment is via conda:
+#
+#     conda env create -f environment.yml
+#     conda activate omics-std
+#     pip install -e ".[test,dev]"
+#
+# The environment.yml includes ALL dependencies: Python, PyTorch, R,
+# Bioconductor, kallisto, and all file-format parsers.
+#
+# If you prefer pip + venv, see the manual setup steps below.
+# =============================================================================
+
+
+# =============================================================================
+# Alternative: pip + venv (Python packages only, no R / kallisto)
+# =============================================================================
+#
+# 1. Create venv:
+#    python -m venv .venv
+#    source .venv/bin/activate        # Linux/macOS
+#    .venv\Scripts\activate           # Windows
+#
+# 2. Install Python deps:
+#    pip install -r requirements.txt
+#
+# 3. Install project in editable mode:
+#    pip install -e ".[test,dev]"
+#
+# NOTE: The following system-level prerequisites are NOT managed by pip
+# and must be installed separately for full functionality.
 # =============================================================================
 
 
 # #############################################################################
-# ##  系统级依赖（需手动安装，pip 无法管理）
+# System-level prerequisites (manual install — NOT managed by pip)
 # #############################################################################
 #
-# 1. R 语言环境 (rpy2 的运行时)
-#    - Windows:  https://cran.r-project.org/bin/windows/base/
-#    - macOS:    brew install r
-#    - Linux:    sudo apt install r-base  (或通过 conda: conda install -c conda-forge r-base)
+# 1. R + Bioconductor (needed by rpy2 for TMM / DESeq2 / VSN / Scran)
+#    - Windows: https://cran.r-project.org/bin/windows/base/
+#    - macOS:   brew install r
+#    - Linux:   sudo apt install r-base
+#    Then in R:
+#      if (!require("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+#      BiocManager::install(c("edgeR", "DESeq2", "limma", "scran"))
 #
-# 2. R Bioconductor 包（TMM / DESeq2 / VSN / Scran 归一化需要）
-#    打开 R 终端，执行:
-#    ```r
-#    if (!require("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-#    BiocManager::install(c("edgeR", "DESeq2", "limma", "scran"))
-#    ```
+# 2. kallisto (needed for FASTQ paired-end quantification, must be on PATH)
+#    - conda:  conda install -c bioconda kallisto
+#    - manual: https://pachterlab.github.io/kallisto/download
 #
-# 3. kallisto (FASTQ 双端定量需要，需在 PATH 中)
-#    - conda:   conda install -c bioconda kallisto
-#    - 手动:    https://pachterlab.github.io/kallisto/download
-#
-# 4. DM8 数据库 (仅 Windows 用户 + 达梦数据库存储)
-#    需安装达梦数据库客户端，pip 安装 dmPython 需要 DM8 驱动头文件
+# 3. DM8 database client (Windows only, optional — SQLite is the default)
+#    Install DM8 client before uncommenting dmPython below.
 # #############################################################################
 
 
 # =============================================================================
-# 核心依赖
+# Core dependencies
 # =============================================================================
 anndata>=0.10
 scanpy>=1.9
@@ -56,60 +80,61 @@ rich
 
 
 # =============================================================================
-# PyTorch + scvi-tools (ZINB-VAE 插补 + DANN 批次校正)
+# PyTorch + scvi-tools (ZINB-VAE imputation + DANN batch correction)
 # =============================================================================
 torch>=1.13
 scvi-tools>=1.0
 
 
 # =============================================================================
-# R/rpy2 (TMM / DESeq2 / VSN / Scran 归一化)
-# ⚠️ 需先安装 R 和 Bioconductor 包（见顶部系统级依赖说明）
+# R / rpy2 bridge (TMM / DESeq2 / VSN / Scran normalization)
+# Prerequisite: R + Bioconductor packages (see system-level section above)
 # =============================================================================
 rpy2>=3.5
 
 
 # =============================================================================
-# 流式细胞术 (.fcs 文件解析)
+# Flow cytometry (.fcs parser)
 # =============================================================================
 fcsparser>=0.2
 
 
 # =============================================================================
-# 质谱 (.mzML 文件解析)
+# Mass spectrometry (.mzML parser)
 # =============================================================================
 pymzml>=2.5
 
 
 # =============================================================================
-# MAGIC 插补
+# MAGIC imputation (KNN-graph Markov diffusion)
 # =============================================================================
 magic-impute>=3.0
 
 
 # =============================================================================
-# NGS (.bam / .sam / FASTQ 解析)
-# ⚠️ FASTQ 双端模式需要系统安装 kallisto 并在 PATH 中（见顶部说明）
+# NGS (.bam / .sam / FASTQ parsing)
+# FASTQ paired-end mode requires kallisto on PATH (see system-level section)
 # =============================================================================
 pysam>=0.22
 
 
 # =============================================================================
-# 微生物组 (BIOM 格式解析)
+# Microbiome (BIOM format parsing)
 # =============================================================================
 biom-format>=2.1
 
 
 # =============================================================================
-# 混合存储 (MinIO 对象存储 + Neo4j 图数据库)
+# Hybrid storage (MinIO object store + Neo4j graph database)
+# All backends auto-fallback to local storage when drivers are missing
 # =============================================================================
 minio>=7.2
 neo4j>=5.20
-# dmPython>=8.0  # 取消注释前请先安装达梦 DM8 数据库客户端
+# dmPython>=8.0  # uncomment after installing DM8 database client
 
 
 # =============================================================================
-# 开发与测试
+# Dev & test
 # =============================================================================
 pytest>=7.0
 pytest-cov
@@ -119,7 +144,7 @@ pre-commit
 
 
 # =============================================================================
-# 文档构建
+# Documentation
 # =============================================================================
 sphinx>=6.0
 myst-nb>=1.0
