@@ -53,6 +53,10 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "format": "h5mu",  # h5mu | h5ad | parquet
         "compress": True,
         "save_reports": True,
+        "batch": {
+            "combined_filename": "combined",
+            "per_modality_subdir": True,
+        },
     },
 }
 

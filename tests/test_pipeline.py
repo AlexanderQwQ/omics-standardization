@@ -1,5 +1,7 @@
 """流水线集成测试"""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from pipeline import StandardizationPipeline
@@ -87,4 +89,90 @@ class TestPipelineWithStorage:
 
         # 至少一个步骤应被记录
         assert has_imputation or has_normalization or has_batch
+
+
+class TestBatchPipeline:
+    """批量处理模式测试"""
+
+    def test_pick_best_file_picks_h5ad_over_csv(self) -> None:
+        """同模态 .h5ad 应优先于 .csv"""
+        files = [
+            Path("data/raw/scrna/sample.csv"),
+            Path("data/raw/scrna/sample.h5ad"),
+        ]
+        best = StandardizationPipeline._pick_best_file(files)
+        assert best.suffix == ".h5ad"
+
+    def test_pick_best_file_picks_fcs_over_csv(self) -> None:
+        """同模态 .fcs 应优先于 .csv"""
+        files = [
+            Path("data/raw/proteomics/sample.csv"),
+            Path("data/raw/proteomics/sample.fcs"),
+        ]
+        best = StandardizationPipeline._pick_best_file(files)
+        assert best.suffix == ".fcs"
+
+    def test_pick_best_file_single_file(self) -> None:
+        """只有一个文件时直接返回"""
+        files = [Path("data/raw/microbiome/otu.biom")]
+        best = StandardizationPipeline._pick_best_file(files)
+        assert best == files[0]
+
+    def test_pick_best_file_sorts_by_priority(self) -> None:
+        """多个不同格式按优先级排序"""
+        files = [
+            Path("data/raw/test/sample.txt"),
+            Path("data/raw/test/sample.csv"),
+            Path("data/raw/test/sample.h5ad"),
+        ]
+        best = StandardizationPipeline._pick_best_file(files)
+        assert best.suffix == ".h5ad"
+
+    def test_merge_to_combined_mudata(self, multi_modality_adata_dict) -> None:
+        """合并多个 AnnData → MuData，验证模态键名"""
+        from mudata import MuData
+
+        combined = StandardizationPipeline._merge_to_combined_mudata(multi_modality_adata_dict)
+        assert isinstance(combined, MuData)
+        assert "scrna" in combined.mod
+        assert "bulk_rna" in combined.mod
+        assert "atac" in combined.mod
+
+    def test_run_batch_with_tmp_dir(self, mock_data_dir, tmp_path) -> None:
+        """批量处理模拟目录，验证输出结构"""
+        output_dir = tmp_path / "data" / "processed"
+        output_dir.mkdir(parents=True)
+
+        pipeline = StandardizationPipeline()
+        result = pipeline.run(
+            input_path=str(mock_data_dir),
+            output_path=str(output_dir),
+        )
+
+        # 应返回合并的 MuData
+        from mudata import MuData
+        assert isinstance(result, MuData)
+
+        # 验证包含两种模态
+        assert "scrna" in result.mod
+        assert "bulk_rna" in result.mod
+
+        # 验证单模态输出文件
+        scrna_dir = output_dir / "scrna"
+        bulk_dir = output_dir / "bulk_rna"
+        assert scrna_dir.is_dir()
+        assert bulk_dir.is_dir()
+
+        # 验证汇总 MuData 文件
+        combined_file = output_dir / "combined.h5mu"
+        assert combined_file.exists()
+
+    def test_run_batch_empty_directory(self, tmp_path) -> None:
+        """空目录应抛出 ValueError"""
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+
+        pipeline = StandardizationPipeline()
+        with pytest.raises(ValueError, match="未找到支持的数据文件"):
+            pipeline.run(input_path=str(empty_dir))
 

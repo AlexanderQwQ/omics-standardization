@@ -54,6 +54,10 @@
 
 每步处理结果写入 `adata.uns["standardization"]` 用于溯源追踪。
 
+### 批量处理模式
+
+当 `input_path` 为目录时，流水线自动进入批量模式：递归扫描所有支持格式 → 按父目录分组为模态 → 每模态自动选择最优格式 → 逐模态运行 6 步流水线 → 合并输出 `combined.h5mu` MuData 容器。
+
 ## 安装
 
 ### 推荐方式：Conda（一键安装，含 R + kallisto + CUDA PyTorch）
@@ -138,7 +142,20 @@ from preprocessing import impute, normalize, batch_correct  # pp.* 命名空间
 # ---- 方式 1：端到端流水线 ----
 
 pipeline = StandardizationPipeline(config="config/default.yaml")
-result = pipeline.run(input_path="data/raw/", output_path="data/processed/result.h5mu")
+
+# 单文件处理
+result = pipeline.run(input_path="data/raw/scrna/sample.h5ad", output_path="data/processed/result.h5mu")
+
+# 批量目录处理（输入为目录时自动启用）
+result = pipeline.run(input_path="data/raw/", output_path="data/processed/")
+# result 是包含所有模态的 MuData 对象
+# 输出结构：
+#   data/processed/
+#   ├── combined.h5mu          # 合并所有模态的 MuData
+#   ├── scrna/sample.h5mu      # 各模态独立结果
+#   ├── bulk_rna/counts.h5mu
+#   ├── proteomics/panel.h5mu
+#   └── ...
 
 # ---- 方式 2：分步调用 ----
 
@@ -178,12 +195,38 @@ result = pipeline.run(input_path="data/raw/", output_path="data/processed/result
 # 使用默认配置
 omics-std
 
-# 指定输入输出
+# 单文件处理
+omics-std config/default.yaml -i data/raw/scrna/sample.h5ad -o data/processed/
+
+# 批量目录处理（输入为目录时自动启用，输出合并 MuData）
 omics-std config/default.yaml -i data/raw/ -o data/processed/
 
 # 详细日志
 omics-std config/default.yaml -i data/raw/ -o data/processed/ -v
 ```
+
+### 批量输出结构
+
+批量模式下的输出目录结构如下：
+
+```
+data/processed/
+├── combined.h5mu             # 合并所有模态的 MuData 容器
+├── scrna/
+│   └── scrna_expression.h5mu # scRNA-seq 处理后结果
+├── bulk_rna/
+│   └── counts.h5mu           # Bulk RNA-seq 处理后结果
+├── proteomics/
+│   └── panel.h5mu            # 蛋白质组处理后结果
+├── metabolomics/
+│   └── spectra.h5mu          # 代谢组处理后结果
+├── atac/
+│   └── atac_fragments.h5mu   # ATAC-seq 处理后结果
+└── microbiome/
+    └── otu_table.h5mu        # 微生物组处理后结果
+```
+
+可通过 `config/default.yaml` 的 `output.batch` 配置项调整合并文件名（`combined_filename`）和是否创建子目录（`per_modality_subdir`）。
 
 ## 算法目录
 

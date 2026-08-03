@@ -27,13 +27,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--input", "-i",
         type=Path,
-        help="输入数据目录",
+        help="输入数据路径（文件或目录）。目录时自动批量处理所有子目录",
     )
     parser.add_argument(
         "--output", "-o",
         type=Path,
         default=Path("data/processed"),
-        help="输出目录 (默认: data/processed)",
+        help="输出路径（文件或目录，默认: data/processed）",
     )
     parser.add_argument(
         "--verbose", "-v",

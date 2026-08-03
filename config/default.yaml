@@ -166,3 +166,9 @@ output:
   compress: true
   # 是否生成质量报告
   save_reports: true
+  # 批量处理配置（input_path 为目录时生效）
+  batch:
+    # 汇总 MuData 文件名（不含扩展名）
+    combined_filename: combined
+    # 是否为每种模态创建子目录
+    per_modality_subdir: true

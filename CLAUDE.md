@@ -13,7 +13,7 @@
 | 代码检查 | `ruff check src/ tests/` |
 | 自动格式化 | `ruff format src/ tests/` |
 | 构建发布包 | `python -m build` |
-| CLI 运行 | `omics-std config/default.yaml -i data/raw/ -o data/processed/` |
+| CLI 运行 | `omics-std config/default.yaml -i data/raw/ -o data/processed/`（目录输入自动进入批量模式，输出合并 MuData） |
 
 ## 环境搭建（Environment Setup）
 
@@ -124,6 +124,24 @@ from storage import StorageManager      # 混合存储
 ```
 
 每步结果记录在 `adata.uns["standardization"][step_name]` 中，用于溯源追踪。
+
+### 批量目录处理（Batch Directory Processing）
+
+当 `input_path` 为目录时，`StandardizationPipeline.run()` 自动进入批量模式：
+
+1. 调用 `list_supported_files()` ([src/parsers/_utils.py](src/parsers/_utils.py)) 递归扫描全部支持格式
+2. 按父目录名分组为模态（如 `scrna/`、`bulk_rna/`）
+3. 每模态通过 `_pick_best_file()` 选择最优格式文件（优先级：`.h5ad` > `.fcs` > `.mzml` > `.biom` > `.csv` > `.tsv` > `.txt`）
+4. 对每模态最优文件运行完整 6 步流水线
+5. 各模态结果保存至 `output_dir/{modality}/{filename}.h5mu`
+6. 通过 `_merge_to_combined_mudata()` 将全部模态合并为 `output_dir/combined.h5mu` MuData 容器
+
+配置通过 `config/default.yaml` 的 `output.batch` 键控制合并文件名和子目录行为。
+
+新增方法：
+- `_run_batch(input_dir, output_dir, use_storage)` — 编排批量处理流程
+- `_pick_best_file(files)` — 静态方法，从重复格式中选择最优
+- `_merge_to_combined_mudata(results)` — 静态方法，将 `{modality: AnnData}` 字典合并为 MuData
 
 ### 三个公共命名空间（Three Public Namespaces，遵循 scanpy/muon 约定）
 
@@ -247,6 +265,7 @@ torch（ZINB-VAE, DANN）、rpy2（TMM/DESeq2, VSN, Scran）、minio、neo4j、d
 - **`ensure_dense()` / `check_r_available()` 已激活**：`normalizers/_utils.py` 中的工具函数现已在 TMM、DESeq2、VSN、Scran 等归一化器中实际调用。`ensure_dense()` 含内存安全检查，`check_r_available()` 替代原始 try/except ImportError。
 - **Pipeline ↔ StorageManager 集成**：`StandardizationPipeline.run()` 和 `__init__()` 新增 `use_storage=True` 参数。启用时 `_save()` 调用 StorageManager 的 `put_anndata()`、`save_sample()`、`record_pipeline_run()`、`save_quality_metrics()` 和 `build_knowledge_graph()`。所有存储操作包裹在 try/except 中，失败不阻塞流水线。
 - **TMM/DESeq2 reshape bug 修复**：`size_factors.reshape(1, -1)` 修正为 `.reshape(-1, 1)`（3 处）。原方向广播错误导致归一化因子维度不匹配。
+- **批量处理（Batch Directory Processing）**：`StandardizationPipeline.run()` 在输入为目录时自动进入批量模式。使用 `list_supported_files()` 遍历目录 → 按父目录名分组为模态 → 每模态选最优格式文件（`.h5ad` > `.fcs` > `.mzml` > `.biom` > `.csv`）。批量模式自动跳过同模态的 CSV/TSV 导出副本。输出为 `output_dir/combined.h5mu`（合并 MuData）+ 各模态子目录 `output_dir/{modality}/`。
 
 ### CLI 命令行入口
 
