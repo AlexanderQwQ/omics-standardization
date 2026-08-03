@@ -10,7 +10,9 @@
 from ._modality import ModalitySelector, detect_modality
 from ._strategy import StrategySelector, recommend_strategy
 from ._persistence import (
+    assess_annotation_quality,
     generate_training_data,
+    is_high_quality_available,
     is_model_trained,
     load_modality_model,
     load_strategy_models,
@@ -24,7 +26,9 @@ __all__ = [
     "detect_modality",
     "StrategySelector",
     "recommend_strategy",
+    "assess_annotation_quality",
     "generate_training_data",
+    "is_high_quality_available",
     "is_model_trained",
     "load_modality_model",
     "load_strategy_models",

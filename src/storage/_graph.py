@@ -34,6 +34,23 @@ class GraphDBClient(BaseStorageClient):
 
     未安装 neo4j 驱动时使用 JSON-LD 文件 fallback。
 
+    节点类型 (Node Types):
+        - Sample:  样本节点 (sample_id, modality, condition, organism, batch)
+        - Batch:   批次节点 (batch_id, ...)
+        - Gene:    基因节点 (gene_id, gene_name, ...)
+        - Pathway: 通路节点 (pathway_id, pathway_name, ...)
+        - Disease: 疾病节点 (disease_id, disease_name, ...)
+
+    关系类型 (Relationship Types):
+        - CORRELATED:        样本间相关性 (Sample → Sample)
+        - SAME_BATCH:        样本同批次 (Sample → Sample)
+        - BELONGS_TO_BATCH:  样本归属批次 (Sample → Batch)
+        - SAME_TRAJECTORY:   样本同轨迹 (Sample → Sample)
+        - DIFFERENTIAL:      样本差异表达 (Sample → Sample)
+        - EXPRESSES:         样本表达基因 (Sample → Gene)
+        - INVOLVED_IN:       基因参与通路 (Gene → Pathway)
+        - ASSOCIATED_WITH:   基因关联疾病 (Gene → Disease)
+
     用法:
         graph = GraphDBClient(config={
             "uri": "bolt://localhost:7687",
@@ -43,6 +60,8 @@ class GraphDBClient(BaseStorageClient):
         })
         with graph:
             graph.create_sample_node("S001", modality="scrna", condition="microgravity")
+            graph.create_gene_node("ENSG000001", "TP53")
+            graph.link_sample_genes("S001", ["ENSG000001", "ENSG000002"])
             graph.link_samples("S001", "S002", relation="SAME_BATCH", score=0.87)
             path = graph.find_path("S001", "S005", max_depth=5)
     """
@@ -240,6 +259,144 @@ class GraphDBClient(BaseStorageClient):
 
         return batch_id
 
+    def create_gene_node(
+        self,
+        gene_id: str,
+        gene_name: str | None = None,
+        **properties: Any,
+    ) -> str:
+        """创建基因节点
+
+        Args:
+            gene_id: 基因唯一 ID（如 ENSG000001）
+            gene_name: 基因符号名称（如 TP53）
+            **properties: 额外属性（如 chromosome, start_pos, end_pos, strand）
+
+        Returns:
+            gene_id
+        """
+        props: dict[str, Any] = {
+            "gene_id": gene_id,
+            "gene_name": gene_name or gene_id,
+        }
+        props.update(properties)
+
+        if self._driver:
+            self._run_cypher(
+                """
+                MERGE (g:Gene {gene_id: $gene_id})
+                SET g = $props
+                RETURN g
+                """,
+                {"gene_id": gene_id, "props": props},
+            )
+        else:
+            existing = next((n for n in self._graph_data["nodes"] if n.get("id") == gene_id), None)
+            if existing:
+                existing["properties"] = props
+            else:
+                self._graph_data["nodes"].append({
+                    "id": gene_id,
+                    "type": "Gene",
+                    "labels": ["Gene"],
+                    "properties": props,
+                })
+
+        logg.info(f"图节点已创建: Gene({gene_id})")
+        return gene_id
+
+    def create_pathway_node(
+        self,
+        pathway_id: str,
+        pathway_name: str | None = None,
+        **properties: Any,
+    ) -> str:
+        """创建通路节点
+
+        Args:
+            pathway_id: 通路唯一 ID（如 KEGG:hsa04110, GO:0006915）
+            pathway_name: 通路名称
+            **properties: 额外属性（如 database, category, organism）
+
+        Returns:
+            pathway_id
+        """
+        props: dict[str, Any] = {
+            "pathway_id": pathway_id,
+            "pathway_name": pathway_name or pathway_id,
+        }
+        props.update(properties)
+
+        if self._driver:
+            self._run_cypher(
+                """
+                MERGE (p:Pathway {pathway_id: $pathway_id})
+                SET p = $props
+                RETURN p
+                """,
+                {"pathway_id": pathway_id, "props": props},
+            )
+        else:
+            existing = next((n for n in self._graph_data["nodes"] if n.get("id") == pathway_id), None)
+            if existing:
+                existing["properties"] = props
+            else:
+                self._graph_data["nodes"].append({
+                    "id": pathway_id,
+                    "type": "Pathway",
+                    "labels": ["Pathway"],
+                    "properties": props,
+                })
+
+        logg.info(f"图节点已创建: Pathway({pathway_id})")
+        return pathway_id
+
+    def create_disease_node(
+        self,
+        disease_id: str,
+        disease_name: str | None = None,
+        **properties: Any,
+    ) -> str:
+        """创建疾病节点
+
+        Args:
+            disease_id: 疾病唯一 ID（如 DOID:162, MIM:114480）
+            disease_name: 疾病名称
+            **properties: 额外属性（如 category, ontology, prevalence）
+
+        Returns:
+            disease_id
+        """
+        props: dict[str, Any] = {
+            "disease_id": disease_id,
+            "disease_name": disease_name or disease_id,
+        }
+        props.update(properties)
+
+        if self._driver:
+            self._run_cypher(
+                """
+                MERGE (d:Disease {disease_id: $disease_id})
+                SET d = $props
+                RETURN d
+                """,
+                {"disease_id": disease_id, "props": props},
+            )
+        else:
+            existing = next((n for n in self._graph_data["nodes"] if n.get("id") == disease_id), None)
+            if existing:
+                existing["properties"] = props
+            else:
+                self._graph_data["nodes"].append({
+                    "id": disease_id,
+                    "type": "Disease",
+                    "labels": ["Disease"],
+                    "properties": props,
+                })
+
+        logg.info(f"图节点已创建: Disease({disease_id})")
+        return disease_id
+
     # ------------------------------------------------------------------
     # Relationship operations
     # ------------------------------------------------------------------
@@ -290,6 +447,136 @@ class GraphDBClient(BaseStorageClient):
     def link_sample_to_batch(self, sample_id: str, batch_id: str, properties: dict[str, Any] | None = None) -> None:
         """将样本关联到批次"""
         self.link_samples(sample_id, batch_id, relation="BELONGS_TO_BATCH", properties=properties)
+
+    def _create_relationship(
+        self,
+        source_id: str,
+        target_id: str,
+        source_label: str,
+        target_label: str,
+        source_id_field: str,
+        target_id_field: str,
+        relation: str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """通用关系创建方法（内部使用）
+
+        支持任意节点类型间的关系，同时兼容 Neo4j 和 JSON-LD fallback。
+
+        Args:
+            source_id: 源节点 ID
+            target_id: 目标节点 ID
+            source_label: 源节点标签（如 Sample, Gene）
+            target_label: 目标节点标签（如 Gene, Pathway）
+            source_id_field: 源节点的 ID 属性名
+            target_id_field: 目标节点的 ID 属性名
+            relation: 关系类型
+            properties: 关系属性
+        """
+        props = properties or {}
+        rel_upper = relation.upper()
+
+        if self._driver:
+            self._run_cypher(
+                f"""
+                MATCH (a:{source_label} {{{source_id_field}: $source_id}})
+                MATCH (b:{target_label} {{{target_id_field}: $target_id}})
+                MERGE (a)-[r:{rel_upper}]->(b)
+                SET r = $props
+                """,
+                {"source_id": source_id, "target_id": target_id, "props": props},
+            )
+        else:
+            self._graph_data["edges"].append({
+                "from": source_id,
+                "to": target_id,
+                "type": relation,
+                "properties": props,
+            })
+            self._flush_local()
+
+        logg.info(f"图关系已创建: ({source_id}:{source_label})-[:{relation}]->({target_id}:{target_label})")
+
+    def link_sample_genes(
+        self,
+        sample_id: str,
+        gene_ids: list[str],
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """创建样本表达基因的关系 (Sample → Gene)
+
+        为每个 gene_id 创建 EXPRESSES 关系，表示该样本表达该基因。
+
+        Args:
+            sample_id: 样本 ID
+            gene_ids: 基因 ID 列表
+            properties: 额外关系属性（如 expression_level, p_value）
+        """
+        for gene_id in gene_ids:
+            self._create_relationship(
+                source_id=sample_id,
+                target_id=gene_id,
+                source_label="Sample",
+                target_label="Gene",
+                source_id_field="sample_id",
+                target_id_field="gene_id",
+                relation="EXPRESSES",
+                properties=properties,
+            )
+
+    def link_gene_pathways(
+        self,
+        gene_id: str,
+        pathway_ids: list[str],
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """创建基因参与通路的关系 (Gene → Pathway)
+
+        为每个 pathway_id 创建 INVOLVED_IN 关系，表示该基因参与该通路。
+
+        Args:
+            gene_id: 基因 ID
+            pathway_ids: 通路 ID 列表
+            properties: 额外关系属性（如 evidence, source）
+        """
+        for pathway_id in pathway_ids:
+            self._create_relationship(
+                source_id=gene_id,
+                target_id=pathway_id,
+                source_label="Gene",
+                target_label="Pathway",
+                source_id_field="gene_id",
+                target_id_field="pathway_id",
+                relation="INVOLVED_IN",
+                properties=properties,
+            )
+
+    def link_gene_diseases(
+        self,
+        gene_id: str,
+        disease_ids: list[str],
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """创建基因关联疾病的关系 (Gene → Disease)
+
+        为每个 disease_id 创建 ASSOCIATED_WITH 关系，表示该基因与该疾病相关联。
+
+        Args:
+            gene_id: 基因 ID
+            disease_ids: 疾病 ID 列表
+            properties: 额外关系属性（如 association_type, confidence_score）
+        """
+        for disease_id in disease_ids:
+            self._create_relationship(
+                source_id=gene_id,
+                target_id=disease_id,
+                source_label="Gene",
+                target_label="Disease",
+                source_id_field="gene_id",
+                target_id_field="disease_id",
+                relation="ASSOCIATED_WITH",
+                properties=properties,
+            )
 
     # ------------------------------------------------------------------
     # Query operations

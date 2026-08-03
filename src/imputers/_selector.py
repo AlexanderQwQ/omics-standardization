@@ -16,6 +16,72 @@ if TYPE_CHECKING:
     from anndata import AnnData
 
 
+def _check_low_biomass(adata: AnnData) -> dict[str, Any]:
+    """检测低生物量样本
+
+    检查每个细胞/样本的总计数、检测到的基因数和文库大小，
+    判断是否存在低生物量问题。结果写入 adata.uns。
+
+    Args:
+        adata: 输入 AnnData
+
+    Returns:
+        {
+            "is_low_biomass": bool,
+            "median_counts_per_cell": float,
+            "median_genes_detected": float,
+            "total_library_size": float,
+            "warnings": list[str],
+        }
+    """
+    X = adata.X
+    if hasattr(X, "toarray"):
+        X = X.toarray()
+
+    warnings: list[str] = []
+    is_low_biomass = False
+
+    # (a) 每细胞总计数中位数
+    counts_per_cell = np.sum(X, axis=1)
+    median_counts = float(np.median(counts_per_cell))
+    if median_counts < 500:
+        warnings.append(f"每细胞总计数中位数极低: {median_counts:.1f} (< 500)")
+        is_low_biomass = True
+
+    # (b) 每细胞检测到的基因数中位数
+    genes_detected = np.sum(X > 0, axis=1)
+    median_genes = float(np.median(genes_detected))
+    if median_genes < 200:
+        warnings.append(f"每细胞检测基因数中位数极低: {median_genes:.1f} (< 200)")
+        is_low_biomass = True
+
+    # (c) 文库大小（总计数）
+    total_library = float(np.sum(X))
+    if total_library < 10000:
+        warnings.append(f"文库总计数过小: {total_library:.1f} (< 10000)")
+        is_low_biomass = True
+
+    result = {
+        "is_low_biomass": is_low_biomass,
+        "median_counts_per_cell": median_counts,
+        "median_genes_detected": median_genes,
+        "total_library_size": total_library,
+        "warnings": warnings,
+    }
+
+    # 记录到 adata.uns
+    adata.uns.setdefault("standardization", {})
+    adata.uns["standardization"]["low_biomass_detected"] = is_low_biomass
+    if is_low_biomass:
+        adata.uns["standardization"]["low_biomass_details"] = {
+            "median_counts_per_cell": median_counts,
+            "median_genes_detected": median_genes,
+            "total_library_size": total_library,
+        }
+
+    return result
+
+
 class ImputationSelector:
     """插补方法选择器
 
@@ -30,17 +96,34 @@ class ImputationSelector:
         self._available = ["missforest", "zinb_vae", "magic", "none"]
 
     def select(self, adata: AnnData) -> str:
-        """根据数据特征选择插补方法"""
+        """根据数据特征选择插补方法
+
+        自动检测低生物量样本，若检测到则倾向于更简单的方法
+        （如 MissForest 而非 ZINB-VAE）以适配低计数数据。
+        """
         X = adata.X
         if hasattr(X, "toarray"):
             X = X.toarray()
 
         zero_rate = float(np.mean(X == 0))
 
+        # 低生物量检测
+        biomass_info = _check_low_biomass(adata)
+        if biomass_info["is_low_biomass"]:
+            logg.warning("检测到低生物量样本:")
+            for w in biomass_info["warnings"]:
+                logg.warning(f"  {w}")
+            logg.warning("  建议：小心处理低计数数据，倾向于使用 MissForest 等更简单的方法")
+
         if zero_rate < 0.01:
             method = "none"
         elif zero_rate > 0.5:
-            method = "zinb_vae"
+            # 低生物量时避免 ZINB-VAE（在极低计数下不稳定）
+            if biomass_info["is_low_biomass"]:
+                logg.hint("低生物量 + 高零膨胀 → 使用 MissForest 替代 ZINB-VAE")
+                method = "missforest"
+            else:
+                method = "zinb_vae"
         elif zero_rate < 0.1:
             method = "magic"
         else:

@@ -14,10 +14,11 @@
 
 - **多模态统一解析** — 9 种文件格式 → AnnData/MuData，覆盖 6 大组学数据类型
 - **智能算法选择** — 基于 GMM + RandomForest 自动识别数据模态并推荐最优处理策略
-- **缺失值分类插补** — 3 种算法适配不同零膨胀模式（技术缺失 vs 生物零）
+- **缺失值分类插补** — 3 种算法适配不同零膨胀模式（技术缺失 vs 生物零），含低生物量样本检测
 - **尺度归一化** — 5 种方法覆盖从 bulk 到 single-cell 的归一化需求
-- **批次效应校正** — 3 种方法从经典经验贝叶斯到深度对抗网络
-- **混合存储架构** — MinIO（对象）+ SQLite/DM8（关系型）+ Neo4j（图），全部支持本地 fallback
+- **批次效应校正** — 3 种方法从经典经验贝叶斯到深度对抗网络（GPU 加速 + 模式崩溃检测）
+- **混合存储架构** — MinIO（对象）+ SQLite/DM8（关系型）+ Neo4j（图，扩展 Gene/Pathway/Disease 节点），全部支持本地 fallback + Pipeline 集成
+- **效果评估体系** — MMD / Wasserstein / Batch Silhouette 跨域对齐量化指标
 
 ### 支持的组学模态与文件格式
 
@@ -45,9 +46,9 @@
        │                │                    │                    │           └──────────────┘          │
        ▼                ▼                    ▼                    ▼                  ▼                   ▼
   ┌──────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────┐
-  │ 9 种格式 │    │ GMM 模态识别 │    │ MissForest   │    │ TMM / DESeq2 │    │ ComBat       │    │ 质量指标 │
-  │ →AnnData │    │ RF  策略推荐 │    │ ZINB-VAE     │    │ Scran        │    │ Harmony      │    │ 报告生成 │
-  │          │    │              │    │ MAGIC        │    │ Quantile/VSN │    │ DANN         │    │          │
+  │ 9 种格式 │    │ GMM 模态识别 │    │ MissForest   │    │ TMM / DESeq2 │    │ ComBat       │    │ MMD/WS   │
+  │ →AnnData │    │ RF  策略推荐 │    │ ZINB-VAE     │    │ Scran        │    │ Harmony      │    │ Silhouette│
+  │          │    │              │    │ MAGIC        │    │ Quantile/VSN │    │ DANN (GPU)   │    │          │
   └──────────┘    └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘    └──────────┘
 ```
 
@@ -160,10 +161,15 @@ train_and_persist_models()  # 训练并保存 GMM + RF 模型到 config/models/
 
 from storage import StorageManager
 
-store = StorageManager(config="config/default.yaml")
-store.put_anndata("experiment_001", adata)
-store.save_metadata(sample_id="S001", metadata={"condition": "microgravity"})
-store.link_samples("S001", "S002", relation="same_batch")
+store = StorageManager.from_config("config/default.yaml")
+with store:
+    store.save_sample("S001", experiment_id="E001", modality="scrna", condition="microgravity")
+    store.build_knowledge_graph(adata, experiment_id="E001")
+    store.record_pipeline_run("E001", imputation_method="zinb_vae", normalization_method="scran")
+
+# ---- 方式 5：Pipeline 直接存入存储 ----
+pipeline = StandardizationPipeline(use_storage=True)
+result = pipeline.run(input_path="data/raw/", output_path="data/processed/result.h5mu")
 ```
 
 ### 命令行
@@ -193,11 +199,11 @@ omics-std config/default.yaml -i data/raw/ -o data/processed/ -v
 
 | 算法 | 实现文件 | 原理 | 适用场景 |
 |------|----------|------|----------|
-| **TMM** | `_tmm_deseq.py` | 加权截断均值 M 值归一化（edgeR） | Bulk RNA-seq |
+| **TMM** | `_tmm_deseq.py` | 加权截断均值 M 值（R + Python 原生 + CPM 三级 fallback） | Bulk RNA-seq |
 | **DESeq2** | `_tmm_deseq.py` | 中位数比率法 | Bulk RNA-seq |
 | **Scran** | `_scran.py` | 单细胞池化去卷积标准化 | scRNA-seq（三级 fallback） |
 | **Quantile** | `_quantile.py` | 分位数归一化 | 蛋白质组 / 代谢组 |
-| **VSN** | `_quantile.py` | 方差稳定归一化 | 质谱数据 |
+| **VSN** | `_quantile.py` | 方差稳定（R limma + arcsinh auto-tune + log2 三级 fallback） | 质谱数据 |
 
 ### 批次效应校正（`batch_correctors/`）
 
@@ -205,7 +211,7 @@ omics-std config/default.yaml -i data/raw/ -o data/processed/ -v
 |------|----------|------|----------|
 | **ComBat** | `_combat.py` | 经验贝叶斯批次校正 | 通用型，适合各模态 |
 | **Harmony** | `_harmony.py` | 迭代软聚类校正 | 单细胞数据 |
-| **DANN** | `_dann.py` | 域对抗神经网络（梯度反转层） | 深度学习，需要 PyTorch |
+| **DANN** | `_dann.py` | 域对抗神经网络（GRL + GPU 加速 + 模式崩溃检测） | 深度学习，需要 PyTorch |
 
 ## 智能选择器引擎（`selectors/`）
 
@@ -216,7 +222,7 @@ omics-std config/default.yaml -i data/raw/ -o data/processed/ -v
      │
      ▼
 ┌─────────────────┐
-│ 特征提取         │  → [missing_rate, n_obs, n_vars, n_batches]
+│ 特征提取         │  → [missing_rate, n_obs, n_vars, n_batches, file_ext]
 └────────┬────────┘
          ▼
 ┌─────────────────┐
@@ -232,6 +238,7 @@ omics-std config/default.yaml -i data/raw/ -o data/processed/ -v
 
 - **无模型时**：自动 fallback 到启发式规则（覆盖全部 5 种模态）
 - **首次使用建议**：运行 `train_and_persist_models()` 训练并持久化模型到 `config/models/`
+- **标注质量评估**：`assess_annotation_quality()` 评估训练数据质量，`is_high_quality_available()` 判断是否满足"高质量标注多组学库"条件，驱动 GMM→RF 动态切换
 
 ## 混合存储架构（`storage/`）
 
@@ -256,9 +263,12 @@ quality_metrics — 指标 ID、关联运行、指标名、值
 ### 图模式
 
 ```
-(:Sample) -[:CORRELATED]-> (:Sample)      样本间相关性
-(:Sample) -[:BELONGS_TO_BATCH]-> (:Batch)  样本属于批次
-(:Sample) -[:SAME_BATCH]-> (:Sample)        同批次样本
+(:Sample) -[:CORRELATED]-> (:Sample)          样本间相关性
+(:Sample) -[:BELONGS_TO_BATCH]-> (:Batch)     样本属于批次
+(:Sample) -[:SAME_BATCH]-> (:Sample)           同批次样本
+(:Sample) -[:EXPRESSES]-> (:Gene)              样本表达基因
+(:Gene) -[:INVOLVED_IN]-> (:Pathway)            基因参与通路
+(:Gene) -[:ASSOCIATED_WITH]-> (:Disease)        基因关联疾病
 ```
 
 ## 配置系统
@@ -285,6 +295,20 @@ print(settings.imputation)         # 插补配置
 print(settings.storage.minio)      # MinIO 连接配置
 settings.verbosity = Verbosity.debug
 ```
+
+## 评估体系
+
+标准化处理效果通过多维指标量化评估：
+
+| 指标 | 描述 | 计算方式 |
+|------|------|----------|
+| **RMSE** | 均方根误差 | 与原始数据层比较（需 `layers["raw"]`） |
+| **batch_mixing** | 批次混合度 | 批次标签分布均匀度 |
+| **mmd** | 最大均值差异 | RBF kernel MMD²，batch 间分布距离（越低越好） |
+| **wasserstein** | Wasserstein 距离 | 每特征 1D Wasserstein 平均（越低越好） |
+| **batch_silhouette** | 批次轮廓系数 | 1 - silhouette_score(batch)，接近 1 表示批次融合良好 |
+
+三个高级指标在 `obsm["X_corrected"]` 上计算（如存在），回退到 `.X`。单批次边界情况安全处理。
 
 ## 项目结构
 

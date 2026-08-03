@@ -150,7 +150,117 @@ def is_model_trained(model_dir: str | Path = _DEFAULT_MODEL_DIR) -> bool:
         "strategy_rf_normalization.joblib",
         "strategy_rf_batch.joblib",
     ]
-    return all((model_dir / f).exists() for f in required)
+    trained = all((model_dir / f).exists() for f in required)
+    if trained:
+        quality = assess_annotation_quality(model_dir)
+        if quality["warnings"]:
+            for w in quality["warnings"]:
+                logg.warning(f"模型质量警告: {w}")
+        logg.hint(
+            f"模型已训练 (质量评分: {quality['quality_score']:.2f}, "
+            f"充足样本: {quality['sufficient_samples']})"
+        )
+    return trained
+
+
+def assess_annotation_quality(model_dir: str | Path = _DEFAULT_MODEL_DIR) -> dict[str, Any]:
+    """评估训练数据标注质量
+
+    检查训练元数据中的样本量、类别平衡性和模型新鲜度，
+    返回质量评分和警告信息。
+
+    Args:
+        model_dir: 模型目录路径
+
+    Returns:
+        {
+            "quality_score": float,       # 0-1 质量评分
+            "sufficient_samples": bool,   # 样本量是否充足 (>100)
+            "warnings": list[str],        # 警告信息列表
+            "details": dict,              # 详细评估信息
+        }
+    """
+    meta = get_model_metadata(model_dir)
+    warnings: list[str] = []
+    quality_score = 1.0
+
+    # 检查是否有训练统计信息
+    training_stats = meta.get("training_stats")
+    if training_stats is None:
+        warnings.append("训练元数据中缺少训练统计信息（training_stats）")
+        quality_score -= 0.5
+
+    # 检查样本量
+    n_samples = training_stats.get("n_samples", 0) if training_stats else 0
+    sufficient_samples = n_samples > 100
+    if n_samples <= 100:
+        warnings.append(f"训练样本量不足: {n_samples} (建议 > 100)")
+        quality_score -= 0.3
+    elif n_samples < 200:
+        warnings.append(f"训练样本量偏低: {n_samples} (建议 >= 200)")
+        quality_score -= 0.1
+
+    # 检查类别平衡性
+    label_dist = (training_stats or {}).get("label_distribution", {})
+    if label_dist:
+        total = sum(label_dist.values())
+        if total > 0:
+            min_ratio = min(label_dist.values()) / total
+            if min_ratio < 0.05:
+                warnings.append(f"存在严重类别不平衡: 最小类别占比 {min_ratio:.1%}")
+                quality_score -= 0.2
+            elif min_ratio < 0.10:
+                warnings.append(f"存在轻度类别不平衡: 最小类别占比 {min_ratio:.1%}")
+                quality_score -= 0.1
+
+    # 检查模型新鲜度
+    last_trained = meta.get("last_trained")
+    if last_trained:
+        from datetime import timedelta
+        try:
+            trained_dt = datetime.fromisoformat(last_trained)
+            age = datetime.now(timezone.utc) - trained_dt
+            if age > timedelta(days=180):
+                warnings.append(f"模型已超过 180 天未更新 ({age.days} 天)")
+                quality_score -= 0.15
+            elif age > timedelta(days=90):
+                warnings.append(f"模型已超过 90 天未更新 ({age.days} 天)")
+                quality_score -= 0.05
+        except (ValueError, TypeError):
+            pass
+
+    # 确保评分在 0-1 范围内
+    quality_score = max(0.0, min(1.0, quality_score))
+
+    return {
+        "quality_score": quality_score,
+        "sufficient_samples": sufficient_samples,
+        "warnings": warnings,
+        "details": {
+            "n_samples": n_samples,
+            "label_distribution": label_dist,
+            "last_trained": last_trained,
+            "model_dir": str(Path(model_dir)),
+        },
+    }
+
+
+def is_high_quality_available(model_dir: str | Path = _DEFAULT_MODEL_DIR) -> bool:
+    """检查模型是否存在且标注质量良好
+
+    综合判断模型是否可用作高质量推荐。
+    只有模型文件存在且标注质量评分 >= 0.7 时才返回 True。
+
+    Args:
+        model_dir: 模型目录路径
+
+    Returns:
+        True 如果模型存在且质量良好，否则 False
+    """
+    if not is_model_trained(model_dir):
+        return False
+    quality = assess_annotation_quality(model_dir)
+    return quality["quality_score"] >= 0.7
 
 
 # ------------------------------------------------------------------
@@ -180,6 +290,45 @@ def get_model_metadata(model_dir: str | Path = _DEFAULT_MODEL_DIR) -> dict[str, 
     if meta_path.exists():
         return json.loads(meta_path.read_text("utf-8"))
     return {"models": {}, "last_trained": None}
+
+
+def _save_training_stats(
+    model_dir: Path,
+    n_samples: int,
+    y_impute: np.ndarray,
+    y_norm: np.ndarray,
+    y_batch: np.ndarray,
+) -> None:
+    """将训练样本量和标签分布写入元数据
+
+    Args:
+        model_dir: 模型目录
+        n_samples: 训练样本总数
+        y_impute: 插补方法标签数组
+        y_norm: 归一化方法标签数组
+        y_batch: 批次校正方法标签数组
+    """
+    from collections import Counter
+
+    def _count_distribution(labels: np.ndarray) -> dict[str, int]:
+        return dict(Counter(str(l) for l in labels))
+
+    meta_path = model_dir / "training_metadata.json"
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text("utf-8"))
+    else:
+        meta = {"models": {}, "last_trained": None}
+
+    meta["training_stats"] = {
+        "n_samples": n_samples,
+        "label_distribution": {
+            "imputation": _count_distribution(y_impute),
+            "normalization": _count_distribution(y_norm),
+            "batch_correction": _count_distribution(y_batch),
+        },
+    }
+
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 # ------------------------------------------------------------------
@@ -343,6 +492,9 @@ def train_and_persist_models(
     )
     strategy_selector.fit(X, y_impute, y_norm, y_batch)
     save_strategy_models(strategy_selector, model_dir)
+
+    # 4. 记录训练统计信息到元数据
+    _save_training_stats(model_dir, n_samples, y_impute, y_norm, y_batch)
 
     logg.info(f"选择器模型训练完成 (n_samples={n_samples})")
     return {

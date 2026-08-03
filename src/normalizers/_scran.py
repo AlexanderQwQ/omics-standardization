@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from .. import logging as logg
+from ._utils import ensure_dense
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -56,7 +57,7 @@ class ScranNormalizer:
         Returns:
             归一化后的 AnnData (.layers['normalized'])
         """
-        X = adata.X.toarray() if hasattr(adata.X, "toarray") else adata.X
+        X = ensure_dense(adata.X)
 
         # 尝试 R 接口（完整实现）
         try:
@@ -105,9 +106,11 @@ class ScranNormalizer:
         )
 
         # 创建 colData (细胞元数据)
-        col_data = ro.DataFrame({
-            "cell_id": ro.StrVector([f"cell_{i}" for i in range(X_filtered.shape[0])]),
-        })
+        col_data = ro.DataFrame(
+            {
+                "cell_id": ro.StrVector([f"cell_{i}" for i in range(X_filtered.shape[0])]),
+            }
+        )
 
         sce = sce_pkg.SingleCellExperiment(
             assays=base.list(counts=counts_r),
@@ -118,13 +121,17 @@ class ScranNormalizer:
         clusters = scran.quickCluster(sce, min_size=base.as_integer(100))
         sce = sce_pkg.SingleCellExperiment(
             assays=base.list(counts=counts_r),
-            colData=ro.DataFrame({
-                "cluster": clusters,
-            }),
+            colData=ro.DataFrame(
+                {
+                    "cluster": clusters,
+                }
+            ),
         )
 
         # 4. 计算 size factors
-        sce = scran.computeSumFactors(sce, clusters=clusters, min_mean=ro.FloatVector([self.min_mean]))
+        sce = scran.computeSumFactors(
+            sce, clusters=clusters, min_mean=ro.FloatVector([self.min_mean])
+        )
 
         # 5. 提取 size factors
         size_factors = np.array(sce.rx2("sizeFactors"))
@@ -177,7 +184,9 @@ class ScranNormalizer:
 
         # 3. 在每个簇内进行池化
         pool_sizes = self.pool_sizes or [20, 40, 60, 80]
-        all_pools: list[tuple[list[int], ...]] = []  # 每个元素是 (pool_cell_indices, pool_sum, cluster_id)
+        all_pools: list[
+            tuple[list[int], ...]
+        ] = []  # 每个元素是 (pool_cell_indices, pool_sum, cluster_id)
 
         rng = np.random.RandomState(42)
         for cluster_id in range(n_clusters):
@@ -191,7 +200,7 @@ class ScranNormalizer:
                 rng.shuffle(cluster_cells)
                 n_pools = max(1, len(cluster_cells) // size)
                 for p in range(n_pools):
-                    pool_cells = cluster_cells[p * size:(p + 1) * size]
+                    pool_cells = cluster_cells[p * size : (p + 1) * size]
                     if len(pool_cells) > 1:
                         pool_sum = X_filt[pool_cells, :].sum(axis=0)
                         all_pools.append((pool_cells.tolist(), pool_sum, cluster_id))
@@ -241,7 +250,7 @@ class ScranNormalizer:
         sc.pp.normalize_total(adata_copy, target_sum=1e4)
         sc.pp.log1p(adata_copy)
 
-        X_norm = adata_copy.X.toarray() if hasattr(adata_copy.X, "toarray") else adata_copy.X
+        X_norm = ensure_dense(adata_copy.X)
         self._save(adata, X_norm, "scran_fallback")
         return adata
 

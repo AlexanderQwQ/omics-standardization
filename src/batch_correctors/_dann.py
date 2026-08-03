@@ -100,12 +100,14 @@ class DANCorrector:
         learning_rate: float = 0.001,
         lambda_adv: float = 1.0,
         latent_dim: int = 32,
+        device: str = "auto",
     ) -> None:
         self.n_epochs = n_epochs
         self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.lambda_adv = lambda_adv
         self.latent_dim = latent_dim
+        self.device = device
 
     def run(self, adata: AnnData, batch_key: str = "batch", **kwargs: Any) -> AnnData:
         """执行 DANN 批次校正
@@ -147,6 +149,21 @@ class DANCorrector:
         hidden_dim = min(256, n_vars)
 
         # ------------------------------------------------------------------
+        # 设备选择（auto: CUDA > MPS > CPU）
+        # ------------------------------------------------------------------
+        if self.device == "auto":
+            if torch.cuda.is_available():
+                resolved_device = "cuda"
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                resolved_device = "mps"
+            else:
+                resolved_device = "cpu"
+        else:
+            resolved_device = self.device
+        device = torch.device(resolved_device)
+        logg.info(f"  DANN using device: {resolved_device}")
+
+        # ------------------------------------------------------------------
         # 构建网络
         # ------------------------------------------------------------------
         # 特征提取器 E(x) → z
@@ -182,10 +199,17 @@ class DANCorrector:
         )
 
         # ------------------------------------------------------------------
+        # 移动模型到设备
+        # ------------------------------------------------------------------
+        encoder = encoder.to(device)
+        decoder = decoder.to(device)
+        domain_classifier = domain_classifier.to(device)
+
+        # ------------------------------------------------------------------
         # 训练
         # ------------------------------------------------------------------
-        X_tensor = torch.tensor(X, dtype=torch.float32)
-        batch_tensor = torch.tensor(batch_indices, dtype=torch.long)
+        X_tensor = torch.tensor(X, dtype=torch.float32, device=device)
+        batch_tensor = torch.tensor(batch_indices, dtype=torch.long, device=device)
 
         # 优化器：encoder + decoder + domain_classifier 联合优化
         all_params = (
@@ -198,6 +222,9 @@ class DANCorrector:
         encoder.train()
         decoder.train()
         domain_classifier.train()
+
+        recon_losses = []
+        domain_losses = []
 
         for epoch in range(self.n_epochs):
             perm = torch.randperm(n_obs)
@@ -228,6 +255,9 @@ class DANCorrector:
                 total_recon_loss += recon_loss.item()
                 total_domain_loss += domain_loss.item()
 
+            recon_losses.append(total_recon_loss)
+            domain_losses.append(total_domain_loss)
+
             if (epoch + 1) % 20 == 0:
                 logg.info(
                     f"  DANN epoch {epoch + 1}/{self.n_epochs}, "
@@ -235,11 +265,123 @@ class DANCorrector:
                 )
 
         # ------------------------------------------------------------------
-        # 提取域不变特征
+        # 提取域不变特征 + 模式崩塌检测
         # ------------------------------------------------------------------
         encoder.eval()
         with torch.no_grad():
-            X_corrected = encoder(X_tensor).numpy()
+            X_corrected = encoder(X_tensor).cpu().numpy()
+
+        # 先做域不变性验证（供模式崩塌检测使用）
+        invariance_score = None
+        try:
+            invariance_score = self._validate_domain_invariance(X_corrected, batch_labels)
+        except Exception:
+            logg.warning("域不变性验证跳过")
+
+        # 模式崩塌检测
+        collapse_info = self._detect_mode_collapse(
+            recon_losses=recon_losses,
+            batch_indices=batch_indices,
+            encoder=encoder,
+            domain_classifier=domain_classifier,
+            X_tensor=X_tensor,
+            invariance_score=invariance_score,
+        )
+
+        # 若检测到模式崩塌，用 ×2 lambda_adv 重试一次
+        if collapse_info.get("collapsed", False):
+            retry_lambda = self.lambda_adv * 2.0
+            logg.warning(
+                f"DANN 模式崩塌检测到: {collapse_info.get('reasons', [])}，"
+                f"尝试增加 lambda_adv (×2) 重新训练"
+            )
+            logg.info(f"  DANN 重试: lambda_adv={self.lambda_adv} → {retry_lambda}")
+
+            # 重建域判别器（新 GRL 使用更高的 lambda_adv）
+            domain_classifier = nn.Sequential(
+                GradientReversalLayer(lambda_=retry_lambda),
+                nn.Linear(latent_dim, 64),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(64, n_batches),
+            ).to(device)
+
+            all_params_retry = (
+                list(encoder.parameters())
+                + list(decoder.parameters())
+                + list(domain_classifier.parameters())
+            )
+            optimizer_retry = torch.optim.Adam(all_params_retry, lr=self.learning_rate)
+
+            encoder.train()
+            decoder.train()
+            domain_classifier.train()
+
+            recon_losses_retry = []
+            domain_losses_retry = []
+
+            for epoch in range(self.n_epochs):
+                perm = torch.randperm(n_obs)
+                total_recon_loss = 0.0
+                total_domain_loss = 0.0
+
+                for i in range(0, n_obs, self.batch_size):
+                    idx = perm[i:i + self.batch_size]
+                    x_batch = X_tensor[idx]
+                    b_batch = batch_tensor[idx]
+
+                    z = encoder(x_batch)
+                    x_recon = decoder(z)
+                    domain_pred = domain_classifier(z)
+
+                    recon_loss = F.mse_loss(x_recon, x_batch)
+                    domain_loss = F.cross_entropy(domain_pred, b_batch)
+                    loss = recon_loss + domain_loss
+
+                    optimizer_retry.zero_grad()
+                    loss.backward()
+                    optimizer_retry.step()
+
+                    total_recon_loss += recon_loss.item()
+                    total_domain_loss += domain_loss.item()
+
+                recon_losses_retry.append(total_recon_loss)
+                domain_losses_retry.append(total_domain_loss)
+
+                if (epoch + 1) % 20 == 0:
+                    logg.info(
+                        f"  DANN retry epoch {epoch + 1}/{self.n_epochs}, "
+                        f"recon={total_recon_loss:.4f}, domain={total_domain_loss:.4f}"
+                    )
+
+            # 重试后重新提取特征并评估
+            encoder.eval()
+            with torch.no_grad():
+                X_corrected = encoder(X_tensor).cpu().numpy()
+
+            invariance_score = None
+            try:
+                invariance_score = self._validate_domain_invariance(X_corrected, batch_labels)
+            except Exception:
+                pass
+
+            collapse_info = self._detect_mode_collapse(
+                recon_losses=recon_losses_retry,
+                batch_indices=batch_indices,
+                encoder=encoder,
+                domain_classifier=domain_classifier,
+                X_tensor=X_tensor,
+                invariance_score=invariance_score,
+            )
+
+            if collapse_info.get("collapsed", False):
+                logg.error(
+                    f"DANN 重试后仍检测到模式崩塌: {collapse_info.get('reasons', [])}。"
+                    f"建议使用 Harmony 作为替代批次校正方法。"
+                )
+            else:
+                logg.info("DANN 重试成功，模式崩塌已缓解")
+                self.lambda_adv = retry_lambda
 
         adata.obsm["X_corrected"] = X_corrected.astype(np.float32)
         adata.uns["standardization"] = adata.uns.get("standardization", {})
@@ -250,17 +392,98 @@ class DANCorrector:
             "latent_dim": latent_dim,
             "lambda_adv": self.lambda_adv,
             "n_batches": n_batches,
+            "device": resolved_device,
+            "domain_invariance": float(invariance_score) if invariance_score is not None else None,
+            "mode_collapse_risk": {
+                "collapsed": collapse_info.get("collapsed", False),
+                "reasons": collapse_info.get("reasons", []),
+                "domain_accuracy": collapse_info.get("domain_accuracy"),
+                "recon_loss_cv": collapse_info.get("recon_loss_cv"),
+            },
         }
-
-        # 验证域不变性
-        try:
-            invariance = self._validate_domain_invariance(X_corrected, batch_labels)
-            adata.uns["standardization"]["batch_correction"]["domain_invariance"] = float(invariance)
-        except Exception:
-            logg.warning("域不变性验证跳过")
 
         logg.info(f"DANN 批次校正完成 (domain-invariant dim={latent_dim})")
         return adata
+
+    def _detect_mode_collapse(
+        self,
+        recon_losses: list,
+        batch_indices: np.ndarray,
+        encoder,
+        domain_classifier,
+        X_tensor,
+        invariance_score: float | None = None,
+    ) -> dict:
+        """检测 DANN 训练中的模式崩塌（mode collapse）
+
+        三个检测维度:
+            1. 域判别器准确率过高 (>95%) — GRL 失效，模型过拟合批次标签
+            2. 重建损失振荡过大 (CV > 0.5) — 训练不稳定
+            3. 域不变性分数过低 (<0.3) — 校正后仍可区分批次
+
+        Args:
+            recon_losses: 每 epoch 的重建损失列表
+            batch_indices: 真实批次标签
+            encoder: 特征提取器（需在 eval 模式）
+            domain_classifier: 域判别器
+            X_tensor: 输入数据张量
+            invariance_score: 预计算的域不变性分数（可选）
+
+        Returns:
+            dict with keys: collapsed, reasons, domain_accuracy, recon_loss_cv
+        """
+        reasons = []
+        domain_accuracy = None
+        recon_loss_cv = None
+
+        n_batches = len(np.unique(batch_indices))
+
+        # 检查 1: 域判别器准确率（仅当 n_batches > 1 时有意义）
+        if n_batches > 1 and torch is not None:
+            try:
+                encoder.eval()
+                domain_classifier.eval()
+                with torch.no_grad():
+                    z = encoder(X_tensor)
+                    domain_pred = domain_classifier(z)
+                    domain_pred_labels = domain_pred.argmax(dim=1).cpu().numpy()
+                    domain_accuracy = float((domain_pred_labels == batch_indices).mean())
+                if domain_accuracy > 0.95:
+                    reasons.append(
+                        f"domain classifier accuracy too high ({domain_accuracy:.3f} > 0.95)"
+                    )
+            except Exception:
+                pass
+
+        # 检查 2: 重建损失振荡幅度（最后 20 个 epoch 或全部）
+        if recon_losses:
+            n_recent = min(20, len(recon_losses))
+            recent = recon_losses[-n_recent:]
+            mean_val = float(np.mean(recent))
+            std_val = float(np.std(recent))
+            recon_loss_cv = std_val / (mean_val + 1e-8)
+            if recon_loss_cv > 0.5:
+                reasons.append(
+                    f"recon loss oscillating wildly (CV={recon_loss_cv:.3f} > 0.5)"
+                )
+
+        # 检查 3: 域不变性分数
+        if invariance_score is not None and invariance_score < 0.3:
+            reasons.append(
+                f"domain invariance too low ({invariance_score:.3f} < 0.3)"
+            )
+
+        collapsed = len(reasons) > 0
+
+        if collapsed:
+            logg.warning(f"DANN 模式崩塌风险: {'; '.join(reasons)}")
+
+        return {
+            "collapsed": collapsed,
+            "reasons": reasons,
+            "domain_accuracy": domain_accuracy,
+            "recon_loss_cv": recon_loss_cv,
+        }
 
     def _validate_domain_invariance(self, X_corrected: np.ndarray, batch_labels: np.ndarray) -> float:
         """验证域不变性：用简单分类器的 batch 预测准确率

@@ -27,18 +27,22 @@ class StandardizationPipeline:
         result = pipeline.run("data/raw/")
     """
 
-    def __init__(self, config: str | Path | None = None) -> None:
+    def __init__(
+        self, config: str | Path | None = None, use_storage: bool = False
+    ) -> None:
         if config is not None:
             settings.load_config(Path(config))
 
         self._steps: list[str] = []
         self._results: dict[str, Any] = {}
+        self._use_storage = use_storage
 
     def run(
         self,
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
         data: AnnData | MuData | None = None,
+        use_storage: bool = False,
     ) -> AnnData:
         """运行完整标准化流水线
 
@@ -77,7 +81,7 @@ class StandardizationPipeline:
 
         # 保存
         if output_path is not None:
-            self._save(data, output_path)
+            self._save(data, output_path, use_storage=use_storage)
 
         logg.info("=" * 60)
         logg.info("标准化流水线完成")
@@ -178,15 +182,25 @@ class StandardizationPipeline:
         logg.info(f"  评估指标: {metrics}")
         return metrics
 
-    def _save(self, data: AnnData, output_path: str | Path) -> None:
-        """保存结果"""
+    def _save(
+        self, data: AnnData, output_path: str | Path, use_storage: bool = False
+    ) -> None:
+        """保存结果到文件系统或混合存储后端
+
+        Args:
+            data: 处理后的 AnnData
+            output_path: 输出路径
+            use_storage: 是否同时保存到 StorageManager 混合存储后端
+        """
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # --- 文件系统保存（始终执行）---
         fmt = settings.output.get("format", "h5mu")
 
         if fmt == "h5mu":
             from mudata import MuData
+
             if isinstance(data, MuData):
                 data.write(str(output_path.with_suffix(".h5mu")))
             else:
@@ -197,3 +211,87 @@ class StandardizationPipeline:
             data.write(str(output_path.with_suffix(f".{fmt}")))
 
         logg.info(f"结果已保存至 {output_path}")
+
+        # --- StorageManager 混合存储集成 ---
+        if not use_storage:
+            return
+
+        try:
+            from ..storage import StorageManager
+
+            store = StorageManager.from_settings()
+            store.connect()
+
+            try:
+                experiment_id = output_path.stem
+
+                # a. 存储处理后的 AnnData 到对象存储
+                store.put_anndata(experiment_id, data)
+                logg.info(f"  AnnData 已存储到对象存储: {experiment_id}")
+
+                # b. 保存样本元数据
+                sample_id = experiment_id
+                modality = None
+                strategy_info = (
+                    data.uns.get("standardization", {}).get("strategy", {})
+                )
+                if isinstance(strategy_info, dict):
+                    modality = strategy_info.get("modality")
+
+                store.save_sample(
+                    sample_id=sample_id,
+                    experiment_id=experiment_id,
+                    modality=modality,
+                )
+                logg.info(f"  样本元数据已保存: {sample_id}")
+
+                # c. 从 adata.uns["standardization"] 提取方法详情并记录流水线运行
+                std_info = data.uns.get("standardization", {})
+
+                imputation_method = None
+                normalization_method = None
+                batch_correction_method = None
+
+                for step_name, var_name in [
+                    ("imputation", "imputation_method"),
+                    ("normalization", "normalization_method"),
+                    ("batch_correction", "batch_correction_method"),
+                ]:
+                    step_info = std_info.get(step_name, {})
+                    if isinstance(step_info, dict):
+                        val = step_info.get("method")
+                        if var_name == "imputation_method":
+                            imputation_method = val
+                        elif var_name == "normalization_method":
+                            normalization_method = val
+                        elif var_name == "batch_correction_method":
+                            batch_correction_method = val
+
+                n_batches = None
+                if "batch" in data.obs.columns:
+                    n_batches = int(data.obs["batch"].nunique())
+
+                run_id = store.record_pipeline_run(
+                    experiment_id=experiment_id,
+                    sample_id=sample_id,
+                    imputation_method=imputation_method,
+                    normalization_method=normalization_method,
+                    batch_correction_method=batch_correction_method,
+                    n_batches=n_batches,
+                )
+                logg.info(f"  流水线运行已记录: {run_id}")
+
+                # d. 保存质量指标
+                metrics = self._results.get("metrics", {})
+                if metrics:
+                    store.save_quality_metrics(run_id, metrics)
+                    logg.info(f"  质量指标已保存: {run_id}")
+
+                # e. 构建知识图谱
+                store.build_knowledge_graph(data, experiment_id)
+
+            finally:
+                store.disconnect()
+
+        except Exception as e:
+            logg.warning(f"Storage 操作失败（非致命）: {e}")

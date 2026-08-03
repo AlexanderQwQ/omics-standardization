@@ -128,7 +128,7 @@ from storage import StorageManager      # 混合存储
 ### 三个公共命名空间（Three Public Namespaces，遵循 scanpy/muon 约定）
 
 - **`pp`** ([src/preprocessing/__init__.py](src/preprocessing/__init__.py)) — 统一入口：`impute()`, `normalize()`, `batch_correct()`, `standardize()`。这些函数接受 `method=None` 自动选择，或指定方法字符串。
-- **`tl`** ([src/tools/__init__.py](src/tools/__init__.py)) — 降维/评估：`pca()`, `umap()`, `evaluate()`
+- **`tl`** ([src/tools/__init__.py](src/tools/__init__.py)) — 降维/评估：`pca()`, `umap()`, `evaluate()` — 返回 rmse、batch_mixing、mmd、wasserstein、batch_silhouette 等指标
 - **`pl`** ([src/plotting/__init__.py](src/plotting/__init__.py)) — 可视化：`qc_before_after()`, `batch_heatmap()`, `embedding()`
 
 ### 混合存储层（Hybrid Storage Layer, `src/storage/`）
@@ -143,7 +143,7 @@ from storage import StorageManager      # 混合存储
 
 所有客户端共享 `BaseStorageClient` ([src/storage/_base.py](src/storage/_base.py))，提供 `put/get/list/delete/exists/is_healthy` + context-manager 支持。**所有驱动均为延迟导入（lazy import）** — 包在无任何存储后端安装时仍可导入。
 
-关系型模式包括三个表：`samples`, `pipeline_runs`, `quality_metrics`。图模式建模 `Sample` 和 `Batch` 节点，以及 `CORRELATED` / `BELONGS_TO_BATCH` / `SAME_BATCH` 关系。
+关系型模式包括三个表：`samples`, `pipeline_runs`, `quality_metrics`。图模式建模 `Sample`、`Batch`、`Gene`、`Pathway`、`Disease` 五种节点类型，以及 `CORRELATED` / `BELONGS_TO_BATCH` / `SAME_BATCH` / `EXPRESSES` / `INVOLVED_IN` / `ASSOCIATED_WITH` 八种关系类型。
 
 存储配置位于 `config/default.yaml` 的 `storage:` 键下。
 
@@ -163,7 +163,7 @@ from storage import StorageManager      # 混合存储
 
 - `selectors/_modality.py`：GMM 聚类在 4 特征向量 `[missing_rate, log1p(n_obs), log1p(n_vars), n_batches]` 上 — **必须与 `_persistence.py` 中的 `generate_training_data()[:, 1:5]` 对齐**。训练后 GMM 区分全部 5 种模态。无模型时启发式规则覆盖全部 5 种：ATAC 在 `n_vars > 10000` 且 `missing_rate > 0.85` 时检测，scRNA 在 `n_vars > 10000` 且 `missing_rate ≤ 0.85` 时检测。
 - `selectors/_strategy.py`：每模态 fallback 表映射 modality → `{imputation, normalization, batch}` 方法。RF 模型使用 6 个特征：`[modality_code, missing_rate, log1p(n_obs), log1p(n_vars), n_batches, file_ext_code]`。
-- `selectors/_persistence.py`：模型训练（`train_and_persist_models()`）、joblib 保存/加载、合成训练数据生成器（500 样本 × 5 模态）。模型存储在 `config/models/`。GMM 训练在 `X[:, 1:5]` 上（排除 modality_code 和 file_ext_code）。
+- `selectors/_persistence.py`：模型训练（`train_and_persist_models()`）、joblib 保存/加载、合成训练数据生成器（500 样本 × 5 模态）。模型存储在 `config/models/`。GMM 训练在 `X[:, 1:5]` 上（排除 modality_code 和 file_ext_code）。`assess_annotation_quality()` 评估训练数据质量（样本量 >100、类别平衡、模型新鲜度）。`is_high_quality_available()` 返回 True 仅当模型存在且质量评分 ≥0.7，为需求中"动态切换 GMM↔RF"提供判断依据。
 
 `detect_modality()` 和 `recommend_strategy()` 在有持久化模型时自动加载；否则回退到启发式/策略表。首次使用需运行 `train_and_persist_models()` 初始化模型目录。
 
@@ -181,7 +181,9 @@ from storage import StorageManager      # 混合存储
 
 - **ZINB-VAE** ([src/imputers/_zinb_vae.py](src/imputers/_zinb_vae.py))：Decoder 输出三个 ZINB 参数（`pi`/dropout, `mu`/mean, `theta`/dispersion），使用正确的 ZINB 负对数似然损失。两种模式：scvi-tools (`use_scvi=True`) 或内置 PyTorch。区分技术性 dropout（pi < 0.5）和生物学零值。
 - **MAGIC** ([src/imputers/_magic.py](src/imputers/_magic.py))：包装 `magic-impute` 包用于 KNN 图马尔可夫扩散。包含异质性 guard：当 `n_vars < 200` 且 `zero_rate > 0.3` 时发出过度平滑风险警告（典型的低维异质性数据如 .fcs 流式细胞术）。对此类数据，推荐使用 MissForest 或 ZINB-VAE。
-- **DANN** ([src/batch_correctors/_dann.py](src/batch_correctors/_dann.py))：使用 `torch.autograd.Function` 基的 `GradientReversalLayer`（标准 GRL，非手动梯度翻转）。联合训练：编码器 + 解码器（重构）+ GRL 后的域分类器。GRL 类仅在 torch 可用时定义 — 模块无 torch 仍可导入。
+- **DANN** ([src/batch_correctors/_dann.py](src/batch_correctors/_dann.py))：使用 `torch.autograd.Function` 基的 `GradientReversalLayer`（标准 GRL，非手动梯度翻转）。联合训练：编码器 + 解码器（重构）+ GRL 后的域分类器。GRL 类仅在 torch 可用时定义 — 模块无 torch 仍可导入。支持 GPU 加速（CUDA/MPS/CPU 自动检测，`device='auto'`）。含模式崩溃检测：训练后验证域分类器准确率、recon loss 振荡 CV 和域不变性分数，检测到崩溃时以 λ×2 重训练。
+- **TMM Python** ([src/normalizers/_tmm_deseq.py](src/normalizers/_tmm_deseq.py))：Python 原生 TMM 实现：几何均值伪参考 → M-value (log2 ratio) + A-value (mean log2 intensity) → 30% M / 5% A 双尾裁剪 → 逆方差加权均值 → 归一化因子。CPM 降为最终 fallback。
+- **VSN arcsinh** ([src/normalizers/_quantile.py](src/normalizers/_quantile.py))：arcsinh 方差稳定化 fallback：`arcsinh(a + b*X)`，用 `scipy.optimize.minimize_scalar` 自动调节 b 最小化特征均值-方差相关性。log2 降为最终 fallback。
 - **Scran** ([src/normalizers/_scran.py](src/normalizers/_scran.py))：三级 fallback — R `scran::computeSumFactors()` via rpy2 → Python 原生 k-means 池化 + 线性反卷积 via `scipy.linalg.lstsq` → `scanpy.pp.normalize_total`。
 - **FASTQ** ([src/parsers/_fastq.py](src/parsers/_fastq.py))：Kallisto 伪比对 via subprocess (`kallisto quant` → 解析 `abundance.tsv`)。自动检测双端配对文件（R1/R2, _1/_2 约定）。kallisto 不可用时回退到基础 reads 计数。
 - **CSV/TSV** ([src/parsers/_csv.py](src/parsers/_csv.py))：自动检测分隔符（逗号 vs 制表符）和矩阵布局（基因×样本 vs 样本×基因）。
@@ -238,6 +240,13 @@ torch（ZINB-VAE, DANN）、rpy2（TMM/DESeq2, VSN, Scran）、minio、neo4j、d
 - **MissForest 正确处理 NA⇔0 区分**：`MissForestImputer.run()` 现在使用 `np.isnan(X)` 检测缺失值，而非将 0 视为缺失。NaN/None 是需要插补的缺失值；0 是真实零表达。
 - **MAGIC 过度平滑**：`MAGICImputer.run()` 检测低维异质性数据（`n_vars < 200` 且 `zero_rate > 0.3`）并发出警告，建议改用 MissForest 或 ZINB-VAE。此 guard 专门针对 .fcs 流式细胞术数据。
 - **Harmony vs ComBat fallback 质量差距**：Harmony 的 fallback（无 scanpy）是 **no-op 直通** — 批次效应静默地未被校正。ComBat 的 fallback 仅做均值中心化（无方差调整）。DANN 完全无 fallback（硬性要求 PyTorch）。当 scanpy/torch 不可用时，校正器静默降级；检查 `adata.uns["standardization"]["batch_correction"]["method"]` 以确认实际运行了什么。
+- **DANN GPU 加速与模式崩溃检测**：`DANCorrector` 新增 `device="auto"` 参数，自动检测 CUDA/MPS/CPU 并将模型和数据移至设备。`_detect_mode_collapse()` 在训练后检测域分类器准确率(>95%)、重建 loss 振荡(CV>0.5)和域不变性分数(<0.3)来判断模式崩溃。检测到崩溃时以 λ×2 自动重训练，仍失败则建议 Harmony。记录在 `mode_collapse_risk` 字段中。
+- **TMM 三级 fallback 体系**：R (edgeR) → Python 原生实现（M/A-value + 30%/5% trimming + 逆方差加权） → CPM。原 fallback 仅为 CPM，现 Python 路径实现了标准 TMM 的截尾均值 M 值计算。
+- **VSN 三级 fallback 体系**：R (limma) → arcsinh 方差稳定化（auto-tune 最小化 mean-variance correlation） → log2。原 fallback 仅为 `log2(x+1)`，现 arcsinh 路径提供真正的方差稳定化效果。
+- **DESeq2 可配置设计公式**：`DESeq2Normalizer` 新增 `design` 参数。`None` 时使用截距模型 `~1`（正确用于 size factor 估计）。传入 `["condition", "batch"]` 时从 `adata.obs` 提取真实生物学设计列构建 colData。移除了硬编码的 `["A"]*n` 占位符。
+- **`ensure_dense()` / `check_r_available()` 已激活**：`normalizers/_utils.py` 中的工具函数现已在 TMM、DESeq2、VSN、Scran 等归一化器中实际调用。`ensure_dense()` 含内存安全检查，`check_r_available()` 替代原始 try/except ImportError。
+- **Pipeline ↔ StorageManager 集成**：`StandardizationPipeline.run()` 和 `__init__()` 新增 `use_storage=True` 参数。启用时 `_save()` 调用 StorageManager 的 `put_anndata()`、`save_sample()`、`record_pipeline_run()`、`save_quality_metrics()` 和 `build_knowledge_graph()`。所有存储操作包裹在 try/except 中，失败不阻塞流水线。
+- **TMM/DESeq2 reshape bug 修复**：`size_factors.reshape(1, -1)` 修正为 `.reshape(-1, 1)`（3 处）。原方向广播错误导致归一化因子维度不匹配。
 
 ### CLI 命令行入口
 
