@@ -1,20 +1,41 @@
 # =============================================================================
-# omics_standardization -- Conda environment specification
+# omics_standardization -- Conda environment specification (Windows compatible)
 # =============================================================================
 # Usage:
+#   # Step 1: 手动安装 R + Bioconductor + kallisto（见下方说明）
+#   # Step 2:
 #   cd /d d:\Database\omics_standardization
 #   conda env create -f environment.yml
 #   conda activate omics-std
 #   pip install -e ".[test,dev]"
 #
-# Includes: Python + PyTorch + R/Bioconductor + kallisto + all parsers
-# Excludes: dmPython (DM8 driver, Windows-only, manual install)
+# Includes: Python + PyTorch + rpy2 + all Python parsers
+# Excludes from conda (manual install required):
+#   - Bioconductor packages (edgeR, DESeq2, limma, scran) -> install in R manually
+#   - kallisto -> download Windows binary and add to PATH
+#   - dmPython (DM8 driver, Windows-only, optional)
+#
+# ==== Windows 手动安装步骤 ====
+#
+# 1. 安装 R for Windows:
+#    下载: https://cran.r-project.org/bin/windows/base/
+#    安装到默认路径 (C:\Program Files\R\R-4.x.x)
+#
+# 2. 安装 Bioconductor 包（以管理员身份打开 R 或 RStudio）:
+#    if (!require("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+#    BiocManager::install(c("edgeR", "DESeq2", "limma", "scran", "SingleCellExperiment"))
+#
+# 3. 安装 kallisto:
+#    下载: https://pachterlab.github.io/kallisto/download
+#    解压后将 kallisto.exe 所在目录添加到系统 PATH
+#    验证: 新开终端执行 kallisto version
+#
+# 4. （可选）安装 DM8 客户端 → 取消 environment.yml 中 dmPython 的注释
 # =============================================================================
 
 name: omics-std
 channels:
   - conda-forge
-  - bioconda
   - pytorch
   - defaults
 
@@ -44,18 +65,15 @@ dependencies:
   # ---- PyTorch (pytorch channel, CUDA by default) ----
   - pytorch::pytorch>=1.13
 
-  # ---- R + Bioconductor (runtime for rpy2, TMM/DESeq2/VSN/Scran) ----
+  # ---- R + rpy2 bridge (rpy2 needs system R, see manual steps above) ----
+  # conda-forge r-base works on Windows, but Bioconductor packages don't
+  # -> R/Bioconductor must be installed manually (see header)
   - r-base>=4.0
   - rpy2>=3.5
-  - bioconductor-edger
-  - bioconductor-deseq2
-  - bioconductor-limma
-  - bioconductor-scran
 
-  # ---- Bioinformatics tools (bioconda) ----
-  - pysam>=0.22
-  - kallisto
-  - biom-format>=2.1
+  # ---- pysam (BAM/SAM support) is NOT in conda on Windows ----
+  # Only needed for .bam/.sam files. Install manually if required:
+  #   pip install pysam  (needs Visual Studio Build Tools + Cython)
 
   # ---- Dev & test ----
   - pytest>=7.0
@@ -81,4 +99,5 @@ dependencies:
     - magic-impute>=3.0
     - minio>=7.2
     - neo4j>=5.20
+    - biom-format>=2.1
     # - dmPython>=8.0  # uncomment after installing DM8 client
