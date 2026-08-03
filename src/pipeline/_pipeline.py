@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -102,9 +103,18 @@ class StandardizationPipeline:
         logg.info("\n[Step 2/6] 选择处理策略...")
         self._steps.append("select")
 
-        from ..selectors import recommend_strategy
-        strategy = recommend_strategy(data)
+        from ..selectors import recommend_strategy, detect_modality
+        modality = detect_modality(data)
+        strategy = recommend_strategy(data, modality=modality)
         self._results["strategy"] = strategy
+
+        # 记录到 trace（修复溯源链断裂）
+        data.uns["standardization"] = data.uns.get("standardization", {})
+        data.uns["standardization"]["strategy"] = {
+            "modality": modality,
+            "strategy": strategy,
+            "timestamp": str(datetime.now(timezone.utc)),
+        }
 
         logg.info(f"  推荐策略: {strategy}")
         return strategy
@@ -157,6 +167,15 @@ class StandardizationPipeline:
         from ..tools._evaluation import run_evaluation
         metrics = run_evaluation(data)
         self._results["metrics"] = metrics
+
+        # 记录评估结果到 trace（修复溯源链断裂）
+        data.uns["standardization"] = data.uns.get("standardization", {})
+        data.uns["standardization"]["evaluation"] = {
+            "metrics": metrics,
+            "timestamp": str(datetime.now(timezone.utc)),
+        }
+
+        logg.info(f"  评估指标: {metrics}")
         return metrics
 
     def _save(self, data: AnnData, output_path: str | Path) -> None:

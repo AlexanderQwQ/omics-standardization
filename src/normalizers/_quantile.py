@@ -54,6 +54,7 @@ class VSNNormalizer:
         """执行 VSN 归一化"""
         X = adata.X.toarray() if hasattr(adata.X, "toarray") else adata.X
 
+        method_detail = "vsn"
         try:
             import rpy2.robjects as ro
             from rpy2.robjects import numpy2ri
@@ -61,13 +62,15 @@ class VSNNormalizer:
             numpy2ri.activate()
             limma = importr("limma")
             X_norm = np.array(limma.normalizeVSN(X.T)).T
+            method_detail = "vsn (rpy2/limma)"
         except ImportError:
-            logg.warning("rpy2/limma 未安装，回退到 log2 变换")
+            logg.warning("rpy2/limma 未安装，回退到 log2 变换（非方差稳定化）")
             X_norm = np.log2(X + 1)
+            method_detail = "vsn (log2 fallback)"
 
         adata.layers["normalized"] = X_norm.astype(np.float32)
         adata.uns["standardization"] = adata.uns.get("standardization", {})
-        adata.uns["standardization"]["normalization"] = {"method": "vsn"}
+        adata.uns["standardization"]["normalization"] = {"method": method_detail}
 
-        logg.info("VSN 归一化完成")
+        logg.info(f"VSN 归一化完成 ({method_detail})")
         return adata

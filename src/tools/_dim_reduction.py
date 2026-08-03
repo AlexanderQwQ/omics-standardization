@@ -1,4 +1,4 @@
-"""降维工具：PCA / UMAP / t-SNE 封装"""
+"""降维工具：PCA / UMAP 封装（t-SNE 待实现）"""
 
 from __future__ import annotations
 

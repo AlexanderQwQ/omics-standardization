@@ -88,8 +88,41 @@ def batch_correct(adata: AnnData, method: str | None = None, batch_key: str = "b
     return selector.run(adata, method=method, batch_key=batch_key, **kwargs)
 
 
+def standardize(adata: AnnData, batch_key: str = "batch", **kwargs: Any) -> AnnData:
+    """运行完整标准化流水线（impute → normalize → batch_correct）
+
+    一站式的预处理入口，自动选择最优方法并串联执行。
+
+    Args:
+        adata: 输入 AnnData
+        batch_key: obs 中的批次标签列名
+        **kwargs: 传递给各步骤的额外参数
+
+    Returns:
+        标准化后的 AnnData
+    """
+    from .. import logging as logg
+
+    logg.info("=" * 50)
+    logg.info("开始标准化处理: impute → normalize → batch_correct")
+    logg.info("=" * 50)
+
+    # Step 1: 插补
+    adata = impute(adata, **kwargs)
+
+    # Step 2: 归一化
+    adata = normalize(adata, **kwargs)
+
+    # Step 3: 批次校正
+    adata = batch_correct(adata, batch_key=batch_key, **kwargs)
+
+    logg.info("标准化处理完成")
+    return adata
+
+
 __all__ = [
     "impute",
     "normalize",
     "batch_correct",
+    "standardize",
 ]

@@ -252,6 +252,13 @@ class DANCorrector:
             "n_batches": n_batches,
         }
 
+        # 验证域不变性
+        try:
+            invariance = self._validate_domain_invariance(X_corrected, batch_labels)
+            adata.uns["standardization"]["batch_correction"]["domain_invariance"] = float(invariance)
+        except Exception:
+            logg.warning("域不变性验证跳过")
+
         logg.info(f"DANN 批次校正完成 (domain-invariant dim={latent_dim})")
         return adata
 

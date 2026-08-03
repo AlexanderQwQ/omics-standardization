@@ -43,6 +43,7 @@ _EXTENSION_MAP: dict[str, str] = {
     ".txt.gz": "csv",
     ".biom": "biom",
     ".biom.gz": "biom",
+    ".json": "biom",  # BIOM 1.0 JSON 格式
 }
 
 

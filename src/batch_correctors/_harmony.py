@@ -47,7 +47,9 @@ class HarmonyCorrector:
                 adata,
                 key=batch_key,
                 max_iter_harmony=self.max_iter_harmony,
+                theta=self.theta,  # 多样性惩罚参数（防止模式崩溃）
             )
+            method_detail = "harmony (scanpy)"
         except Exception:
             logg.warning(
                 "scanpy harmony_integrate 不可用，回退到数据直通模式。"
@@ -59,10 +61,11 @@ class HarmonyCorrector:
             else:
                 X = adata.X.toarray() if hasattr(adata.X, "toarray") else adata.X
                 adata.obsm["X_corrected"] = X.astype(np.float32)
+            method_detail = "harmony (no-op fallback)"
 
         adata.uns["standardization"] = adata.uns.get("standardization", {})
         adata.uns["standardization"]["batch_correction"] = {
-            "method": "harmony",
+            "method": method_detail,
             "batch_key": batch_key,
         }
 

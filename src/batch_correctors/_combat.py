@@ -26,12 +26,13 @@ class ComBatCorrector:
     def __init__(self, parametric: bool = True) -> None:
         self.parametric = parametric
 
-    def run(self, adata: AnnData, batch_key: str = "batch", **kwargs: Any) -> AnnData:
+    def run(self, adata: AnnData, batch_key: str = "batch", covariates: list[str] | None = None, **kwargs: Any) -> AnnData:
         """执行 ComBat 校正
 
         Args:
             adata: 输入 AnnData
             batch_key: obs 中的批次标签列名
+            covariates: 需要保留的生物学协变量列名（如 cell_type、treatment）
             **kwargs: 覆盖默认参数
 
         Returns:
@@ -41,21 +42,33 @@ class ComBatCorrector:
         batches = adata.obs[batch_key].values
 
         try:
-            # 尝试使用 scanpy 内置的 combat
+            # 尝试使用 scanpy 内置的 combat（支持 covariates）
             import scanpy as sc
             adata_copy = adata.copy()
-            sc.pp.combat(adata_copy, key=batch_key, parametric=self.parametric)
+            combat_kwargs = {
+                "key": batch_key,
+                "parametric": self.parametric,
+            }
+            # 转发 covariates 参数以保护真实生物信号
+            if covariates is not None and len(covariates) > 0:
+                combat_kwargs["covariates"] = covariates
+            # 合并额外 kwargs
+            combat_kwargs.update(kwargs)
+            sc.pp.combat(adata_copy, **combat_kwargs)
             X_corrected = adata_copy.X.toarray() if hasattr(adata_copy.X, "toarray") else adata_copy.X
+            method_detail = "combat (scanpy)"
         except Exception:
-            logg.warning("scanpy combat 失败，使用简化实现")
+            logg.warning("scanpy combat 失败，使用简化实现（仅均值中心化，无方差调整）")
             X_corrected = self._simple_combat(X, batches)
+            method_detail = "combat (simple fallback)"
 
         # 保存到 .obsm
         adata.obsm["X_corrected"] = X_corrected.astype(np.float32)
         adata.uns["standardization"] = adata.uns.get("standardization", {})
         adata.uns["standardization"]["batch_correction"] = {
-            "method": "combat",
+            "method": method_detail,
             "batch_key": batch_key,
+            "covariates": covariates or [],
         }
 
         logg.info("ComBat 批次校正完成")

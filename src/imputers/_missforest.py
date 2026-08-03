@@ -42,20 +42,35 @@ class MissForestImputer:
 
         Returns:
             插补后的 AnnData
+
+        Note:
+            正确处理 NaN/None（真正缺失）与 0（真实零表达）的区别：
+            - NaN/None → 视为需要插补的缺失值
+            - 0 → 视为真实零表达，不强制插补（除非配置了 min_expression 阈值）
         """
         from sklearn.ensemble import RandomForestRegressor
 
         X = adata.X.toarray() if hasattr(adata.X, "toarray") else adata.X.copy()
+        X = X.astype(np.float64)
 
-        # 找到缺失位置
-        missing_mask = X == 0
+        # 检测缺失值：NaN 或显式标记的 NA（与真实零值区分）
+        missing_mask = np.isnan(X)
+        # 同时将显式标记的负值哨兵（如 -1 标记的缺失）视为缺失
+        sentinel_mask = np.isneginf(X)
+        missing_mask = missing_mask | sentinel_mask
+
         if not np.any(missing_mask):
-            logg.info("无缺失值，跳过 MissForest")
+            logg.info("无 NaN/缺失值，跳过 MissForest")
             return adata
 
-        # 用列均值初始化缺失值
+        n_missing = int(np.sum(missing_mask))
+        logg.info(f"MissForest: 检测到 {n_missing} 个缺失值（NaN），开始插补...")
+
+        # 用列均值（忽略 NaN）初始化缺失位置
         X_imputed = X.copy()
-        col_means = np.nanmean(np.where(X == 0, np.nan, X), axis=0)
+        col_means = np.nanmean(X, axis=0)
+        # NaN 列均值回退为 0
+        col_means = np.where(np.isnan(col_means), 0.0, col_means)
         for j in range(X.shape[1]):
             X_imputed[missing_mask[:, j], j] = col_means[j]
 
@@ -75,6 +90,13 @@ class MissForestImputer:
                 X_train = np.delete(X_train, j, axis=1)
                 y_train = X[train_mask, j]
 
+                # 移除训练数据中仍有 NaN 的行
+                valid_train = ~np.isnan(y_train)
+                if valid_train.sum() < 10:
+                    continue
+                X_train = X_train[valid_train, :]
+                y_train = y_train[valid_train]
+
                 X_pred = X_imputed[missing_mask[:, j], :]
                 X_pred = np.delete(X_pred, j, axis=1)
 
@@ -92,13 +114,14 @@ class MissForestImputer:
                 break
 
         # 保存结果到 layer
-        adata.layers["imputed"] = X_imputed
+        adata.layers["imputed"] = X_imputed.astype(np.float32)
         adata.uns["standardization"] = adata.uns.get("standardization", {})
         adata.uns["standardization"]["imputation"] = {
             "method": "missforest",
             "n_estimators": self.n_estimators,
             "max_iter": self.max_iter,
+            "n_missing_imputed": n_missing,
         }
 
-        logg.info("MissForest 插补完成")
+        logg.info(f"MissForest 插补完成 ({n_missing} 个缺失值)")
         return adata

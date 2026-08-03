@@ -45,7 +45,13 @@ class BatchCorrectionSelector:
         elif n_batches < 5:
             method = "combat"
         elif n_obs > 50000:
-            method = "dann"
+            # 检查 PyTorch 是否可用，避免选到无法运行的 DANN
+            try:
+                import torch  # noqa: F401
+                method = "dann"
+            except ImportError:
+                logg.warning("PyTorch 未安装，无法使用 DANN，回退到 Harmony")
+                method = "harmony"
         else:
             method = "harmony"
 

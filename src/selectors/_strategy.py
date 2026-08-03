@@ -38,7 +38,16 @@ _FALLBACK_STRATEGIES: dict[str, dict[str, str]] = {
 def _build_feature_vector(
     modality: str, adata: AnnData, batch_key: str = "batch"
 ) -> np.ndarray:
-    """构建用于策略推荐的归一化特征向量"""
+    """构建用于策略推荐的归一化特征向量
+
+    特征包括：
+        - modality_code: 模态编码
+        - missing_rate: 缺失率
+        - log1p(n_obs): 对数样本数
+        - log1p(n_vars): 对数特征数
+        - n_batches: 批次数
+        - file_ext_code: 源文件格式编码（CSV=0, H5AD=1, MTX=2, FCS=3, MZML=4, BIOM=5, 其他=6）
+    """
     X = adata.X
     if hasattr(X, "toarray"):
         X = X.toarray()
@@ -47,9 +56,28 @@ def _build_feature_vector(
     missing_rate = float(np.mean(X == 0))
     n_batches = len(np.unique(adata.obs[batch_key])) if batch_key in adata.obs else 1
 
-    # 对分类变量做简单编码
+    # 模态编码
     modality_map = {"scrna": 0, "bulk_rna": 1, "proteomics": 2, "metabolomics": 3, "atac": 4}
     modality_code = modality_map.get(modality, 0)
+
+    # 文件扩展名编码（从 uns 中获取源文件信息）
+    file_ext = "unknown"
+    if "standardization" in adata.uns and "parser" in adata.uns["standardization"]:
+        source = str(adata.uns["standardization"]["parser"].get("source", ""))
+        source_lower = source.lower()
+        for ext, code in [
+            (".csv", 0), (".tsv", 0), (".txt", 0),
+            (".h5ad", 1), (".loom", 1), (".h5mu", 1),
+            (".mtx", 2), (".fcs", 3),
+            (".mzml", 4), (".biom", 5), (".json", 5),
+        ]:
+            if source_lower.endswith(ext):
+                file_ext_code = code
+                break
+        else:
+            file_ext_code = 6  # unknown
+    else:
+        file_ext_code = 6  # unknown
 
     return np.array([
         modality_code,
@@ -57,6 +85,7 @@ def _build_feature_vector(
         np.log1p(n_obs),
         np.log1p(n_vars),
         n_batches,
+        file_ext_code,
     ]).reshape(1, -1)
 
 

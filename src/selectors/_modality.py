@@ -68,21 +68,96 @@ class ModalitySelector:
             )
             self.model.n_components = max(1, features.shape[0])
         self.model.fit(features)
+        # 训练后校准：按聚类中心的特征值排序，建立 cluster → modality 映射
+        self._calibrate_labels()
         return self
 
+    def _calibrate_labels(self) -> None:
+        """校准 GMM 聚类标签到模态标签的映射
+
+        按聚类中心在特征维度的排序建立映射：
+        - 特征索引: [missing_rate, log1p(n_obs), log1p(n_vars), n_batches]
+        - 按 log1p(n_vars)（索引 2）升序排列：
+          proteomics(最低) < metabolomics < bulk_rna < scrna < atac(最高)
+        - 对于 n_vars 相近的聚类，用 missing_rate（索引 0）作为辅助判别
+        """
+        centers = self.model.means_  # shape: (n_components, 4)
+        n_comp = centers.shape[0]
+
+        # 主要按 log1p(n_vars) 排序，次要按 missing_rate 排序
+        # 排序键: (n_vars_rank, missing_rate_rank)
+        n_vars_rank = np.argsort(centers[:, 2])  # log1p(n_vars) 升序
+        self._cluster_to_label: dict[int, str] = {}
+
+        if n_comp == 5:
+            # 标准 5 聚类 → 5 模态映射
+            ordered_modalities = ["proteomics", "metabolomics", "bulk_rna", "scrna", "atac"]
+            for rank, cluster_idx in enumerate(n_vars_rank):
+                self._cluster_to_label[cluster_idx] = ordered_modalities[rank]
+        elif n_comp == 4:
+            ordered_modalities = ["proteomics", "bulk_rna", "scrna", "atac"]
+            for rank, cluster_idx in enumerate(n_vars_rank):
+                self._cluster_to_label[cluster_idx] = ordered_modalities[rank]
+        elif n_comp == 3:
+            ordered_modalities = ["bulk_rna", "scrna", "atac"]
+            for rank, cluster_idx in enumerate(n_vars_rank):
+                self._cluster_to_label[cluster_idx] = ordered_modalities[rank]
+        else:
+            # 不常见情况：回退到启发式按 n_vars 分段
+            for cluster_idx in range(n_comp):
+                center_n_vars = np.expm1(centers[cluster_idx, 2])
+                center_missing = centers[cluster_idx, 0]
+                if center_n_vars > 10000:
+                    label = "atac" if center_missing > 0.85 else "scrna"
+                elif center_n_vars > 5000:
+                    label = "scrna" if center_missing > 0.3 else "bulk_rna"
+                elif center_n_vars < 500:
+                    label = "proteomics" if center_missing < 0.3 else "metabolomics"
+                else:
+                    label = "bulk_rna"
+                self._cluster_to_label[cluster_idx] = label
+
+        logg.info(f"GMM 标签校准完成: {self._cluster_to_label}")
+
     def predict(self, adata: AnnData) -> str:
-        """预测单个 AnnData 的模态类型
+        """预测单个 AnnData 的模态类型（硬标签）
 
         Returns:
             "scrna" | "bulk_rna" | "proteomics" | "metabolomics" | "atac"
         """
         features = _extract_features(adata)
         cluster = self.model.predict(features)[0]
-        # 将 cluster 映射到模态标签（简单按索引映射）
-        idx = cluster % len(MODALITY_LABELS)
-        modality = MODALITY_LABELS[idx]
+        # 使用校准后的 cluster → modality 映射（而非随机模运算）
+        if hasattr(self, "_cluster_to_label") and cluster in self._cluster_to_label:
+            modality = self._cluster_to_label[cluster]
+        else:
+            # 未校准时回退：按聚类中心 n_vars 排序推断
+            idx = int(np.argsort(self.model.means_[:, 2])[cluster]) % len(MODALITY_LABELS)
+            modality = MODALITY_LABELS[idx]
         logg.info(f"GMM 检测到模态: {modality} (cluster={cluster})")
         return modality
+
+    def predict_proba(self, adata: AnnData) -> dict[str, float]:
+        """预测模态类型的软聚类概率
+
+        Returns:
+            各模态的概率字典，例如 {"scrna": 0.82, "bulk_rna": 0.10, ...}
+        """
+        features = _extract_features(adata)
+        cluster_probs = self.model.predict_proba(features)[0]  # shape: (n_components,)
+
+        # 将聚类概率映射到模态标签
+        proba: dict[str, float] = {m: 0.0 for m in MODALITY_LABELS}
+        for cluster_idx, prob in enumerate(cluster_probs):
+            if hasattr(self, "_cluster_to_label") and cluster_idx in self._cluster_to_label:
+                label = self._cluster_to_label[cluster_idx]
+            else:
+                idx = int(np.argsort(self.model.means_[:, 2])[cluster_idx]) % len(MODALITY_LABELS)
+                label = MODALITY_LABELS[idx]
+            proba[label] += prob  # 多个聚类映射到同一模态时合并概率
+
+        logg.info(f"GMM 软概率: {proba}")
+        return proba
 
 
 def detect_modality(adata: AnnData) -> str:

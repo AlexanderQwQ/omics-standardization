@@ -130,8 +130,8 @@ def save_modality_model(
     selector: Any,
     model_dir: str | Path = _DEFAULT_MODEL_DIR,
 ) -> Path:
-    """保存 ModalitySelector 的 GMM 模型"""
-    return save_model(selector.model, "modality_gmm", model_dir)
+    """保存 ModalitySelector（包含 GMM 模型和标签校准映射）"""
+    return save_model(selector, "modality_gmm", model_dir)
 
 
 def load_modality_model(
@@ -268,13 +268,26 @@ def generate_training_data(
             norm = "scran"
             batch = "harmony" if n_batches > 1 else "none"
 
-        # 构建特征向量: [modality_code, missing_rate, log(n_obs), log(n_vars), n_batches]
+        # 文件扩展名编码（合成数据中按模态推断）
+        if modality == "scrna":
+            file_ext_code = rng.choice([0, 1, 2], p=[0.3, 0.5, 0.2])  # CSV/H5AD/MTX
+        elif modality == "bulk_rna":
+            file_ext_code = rng.choice([0, 1], p=[0.7, 0.3])  # CSV/H5AD
+        elif modality == "proteomics":
+            file_ext_code = rng.choice([0, 3], p=[0.5, 0.5])  # CSV/FCS
+        elif modality == "metabolomics":
+            file_ext_code = rng.choice([0, 4], p=[0.6, 0.4])  # CSV/MZML
+        else:  # atac
+            file_ext_code = rng.choice([0, 1], p=[0.3, 0.7])  # CSV/H5AD
+
+        # 构建特征向量: [modality_code, missing_rate, log(n_obs), log(n_vars), n_batches, file_ext_code]
         features = np.array([
             modality_code,
             missing_rate,
             np.log1p(n_obs),
             np.log1p(n_vars),
             n_batches,
+            file_ext_code,
         ])
 
         X_list.append(features)
@@ -316,7 +329,9 @@ def train_and_persist_models(
         random_state=gmm_config.get("random_state", 42),
     )
     # GMM 只在特征向量的数值部分上训练（排除第一列的模态编码）
-    modality_selector.fit(X[:, 1:])  # 使用 [missing_rate, log1p(n_obs), log1p(n_vars), n_batches]
+    modality_selector.fit(X[:, 1:5])  # 使用 [missing_rate, log1p(n_obs), log1p(n_vars), n_batches]（不含 modality_code 和 file_ext_code）
+    # 校准 cluster → modality 标签映射
+    modality_selector._calibrate_labels()
     save_modality_model(modality_selector, model_dir)
 
     # 3. 训练 RF 策略推荐器
