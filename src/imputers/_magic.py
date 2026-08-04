@@ -65,13 +65,17 @@ class MAGICImputer:
                 f"建议改用 MissForest 或 ZINB-VAE 插补。"
             )
 
-        magic_op = magic.MAGIC(
-            t=self.t,
-            k=self.k,
-            k_a=self.k_a,
-        )
-
-        X_imputed = magic_op.fit_transform(X, genes=adata.var_names.tolist())
+        try:
+            magic_op = magic.MAGIC(
+                t=self.t,
+                k=self.k,
+                k_a=self.k_a,
+            )
+            X_imputed = magic_op.fit_transform(X, genes=adata.var_names.tolist())
+        except TypeError:
+            # magic-impute >= 3.0 changed API
+            magic_op = magic.MAGIC()
+            X_imputed = magic_op.fit_transform(X)
 
         adata.layers["imputed"] = X_imputed
         adata.uns["standardization"] = adata.uns.get("standardization", {})

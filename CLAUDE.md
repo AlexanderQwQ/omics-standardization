@@ -17,13 +17,23 @@
 
 ## 环境搭建（Environment Setup）
 
-**推荐方式：Conda（一键安装，含 R + kallisto + CUDA PyTorch）**
+**推荐方式：Conda（Python + PyTorch + R + rpy2）**
 
 ```bash
-conda env create -f environment.yml     # 创建完整环境（~2-5 GB）
+conda env create -f environment.yml     # 创建环境（~2-5 GB，仅 conda-forge + pytorch）
 conda activate omics-std                # 激活环境
 pip install -e ".[test,dev]"            # 可编辑安装
 ```
+
+**Windows 手动前置步骤**（`environment.yml` 已移除 bioconda 频道，因其不支持 Windows）：
+1. 安装 R for Windows：https://cran.r-project.org/bin/windows/base/
+2. 在 R 中安装 Bioconductor 包：
+   ```r
+   install.packages("BiocManager")
+   BiocManager::install(c("edgeR", "DESeq2", "limma", "scran", "SingleCellExperiment"))
+   ```
+3. 安装 kallisto（可选，仅 FASTQ 需要）：https://pachterlab.github.io/kallisto/download
+4. 运行时需设置 `R_HOME` 环境变量：`$env:R_HOME = "D:\Anaconda3\envs\omics-std\Lib\R"`
 
 **备选：pip + venv（仅 Python 包，不含 R/kallisto）**
 
@@ -34,15 +44,19 @@ pip install -r requirements.txt                      # 安装全部 Python 依�
 pip install -e ".[test,dev]"                         # 可编辑安装
 ```
 
-pip 用户的系统级前置依赖（详见 `requirements.txt` 头部）：
+系统级前置依赖（需手动安装）：
 - R + Bioconductor 包（`edgeR`, `DESeq2`, `limma`, `scran`）→ TMM/DESeq2/VSN/Scran 归一化
 - `kallisto` 需在 PATH 中 → FASTQ 双端定量
 - DM8 数据库客户端（仅 Windows，可选 → SQLite 为默认后端）
+- `pysam>=0.22`（仅 BAM/SAM，需 Visual Studio Build Tools → Windows 上默认不装）
 
 ### Windows 注意事项
 
 - **Conda**：必须在 Anaconda Prompt 或 PowerShell（`conda init powershell` 后）中运行，Git Bash 通常无法使用 conda
-- **conda env create 耗时较长**：需下载 R、Bioconductor、PyTorch、kallisto 等 ~2-5 GB 包，建议网络良好时执行
+- **R + rpy2**：conda 安装的 R 在 `%CONDA_PREFIX%\Lib\R`，rpy2 需要 `R_HOME` 环境变量指向该路径
+- **bioconda 不可用**：Bioconductor 包（edgeR/DESeq2/limma/scran）在 Windows 上无 conda 构建，须在 R 中手动安装
+- **kallisto**：Windows 版需从官网手动下载并加入 PATH（bioconda 无 Windows 构建）
+- **pysam**：Windows 上无预编译 wheel，需 Visual Studio Build Tools + Cython 从源码构建；BAM/SAM 解析为可选功能
 - **Python 版本**：项目要求 `>=3.10,<3.14`，Windows Store 版 Python 可能版本过新
 - **路径分隔符**：所有配置文件中统一使用正斜杠 `/`
 
@@ -112,7 +126,15 @@ from preprocessing import impute        # pp.* API
 from storage import StorageManager      # 混合存储
 ```
 
-这意味着所有内部导入使用相对路径（`from .. import logging`, `from ._base import BaseParser`）。
+这意味着所有内部导入使用绝对路径（扁平布局，`from _logging import ...` 而非 `from .. import logging`）。注意：`_logging` 和 `_selectors` 以下划线前缀命名，避免与 Python 标准库 `logging`/`selectors` 冲突。
+
+### 模型训练脚本
+
+项目根目录的 `train.py` 是独立的模型训练脚本，不依赖项目导入链：
+```bash
+python train.py     # 训练 GMM + 3 个 RF 模型 → config/models/（5 个文件）
+```
+等效于 `from _selectors._persistence import train_and_persist_models; train_and_persist_models()`，但 `train.py` 绕过了扁平包可能遇到的导入问题。
 
 ### 核心流水线（6 步处理流程）
 
@@ -266,6 +288,13 @@ torch（ZINB-VAE, DANN）、rpy2（TMM/DESeq2, VSN, Scran）、minio、neo4j、d
 - **Pipeline ↔ StorageManager 集成**：`StandardizationPipeline.run()` 和 `__init__()` 新增 `use_storage=True` 参数。启用时 `_save()` 调用 StorageManager 的 `put_anndata()`、`save_sample()`、`record_pipeline_run()`、`save_quality_metrics()` 和 `build_knowledge_graph()`。所有存储操作包裹在 try/except 中，失败不阻塞流水线。
 - **TMM/DESeq2 reshape bug 修复**：`size_factors.reshape(1, -1)` 修正为 `.reshape(-1, 1)`（3 处）。原方向广播错误导致归一化因子维度不匹配。
 - **批量处理（Batch Directory Processing）**：`StandardizationPipeline.run()` 在输入为目录时自动进入批量模式。使用 `list_supported_files()` 遍历目录 → 按父目录名分组为模态 → 每模态选最优格式文件（`.h5ad` > `.fcs` > `.mzml` > `.biom` > `.csv`）。批量模式自动跳过同模态的 CSV/TSV 导出副本。输出为 `output_dir/combined.h5mu`（合并 MuData）+ 各模态子目录 `output_dir/{modality}/`。
+- **扁平包绝对导入**：项目使用 `packages = ["src"]` 扁平布局。所有模块间导入使用绝对路径（如 `import _logging as logg`、`from _selectors import detect_modality`）。不要使用 `from .. import` 相对导入，会在 editable install 下触发 `ImportError: attempted relative import beyond top-level package`。
+- **ZINB-VAE nn 守卫**：`_zinb_vae.py` 中 `ZINBEncoder`/`ZINBDecoder` 类依赖 torch.nn，但 torch 是可选依赖。类定义使用 `_ModuleBase` 模式 — torch 可用时继承 `nn.Module`，否则继承 `object`。`__init__` 中检查 `_ZINB_TORCH_AVAILABLE`，不可用时抛出明确的 ImportError。
+- **Quantile 归一化 axis 方向**：分位数归一化沿 `axis=1`（按行/样本）排序，参考分布沿 `axis=0`（按列求均值）。原 bug 是中沿错误的 axis，当 n_vars > n_obs 时触发 IndexError（如 microbiome 数据 450 特征 > 30 样本）。
+- **FCS bytes 序列化**：`fcsparser` 返回的 `meta` 字典可能含 `bytes` 值，h5py 不支持序列化。`FCSParser._parse()` 已将 bytes 转为 str（`v.decode("utf-8", errors="replace")`），避免 h5py IORegistryError。
+- **MAGIC API 兼容**：`magic-impute >= 3.0` 修改了 MAGIC 构造函数参数。`MAGICImputer.run()` 捕获 TypeError 后回退到无参数构造 + `fit_transform(X)`。
+- **mzML demo 文件**：生成器声明 `32-bit float` 但曾编码 `float64`，导致 pymzml zlib 解压失败。已修正为 `np.float32`。如 mzML 解析仍失败，删除 `.mzML` 文件让批量处理器回退到 `.csv`。
+- **模型加载格式兼容**：`train.py` 保存 GMM 为 dict `{"model": ..., "cluster_to_label": ...}`，`detect_modality()` 兼容此格式和原始 `ModalitySelector` 对象两种加载结果。
 
 ### CLI 命令行入口
 

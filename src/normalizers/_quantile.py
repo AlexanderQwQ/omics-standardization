@@ -25,9 +25,9 @@ class QuantileNormalizer:
         """执行分位数归一化"""
         X = ensure_dense(adata.X)
 
-        # 对每列排序，取平均值作为参考分布
-        X_sorted = np.sort(X, axis=0)
-        reference = np.mean(X_sorted, axis=1)
+        # 对每行（样本）排序，取列均值作为参考分布
+        X_sorted = np.sort(X, axis=1)
+        reference = np.mean(X_sorted, axis=0)
 
         # 将每个样本的值映射到参考分布
         X_norm = np.zeros_like(X)

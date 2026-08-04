@@ -176,7 +176,13 @@ def detect_modality(adata: AnnData) -> str:
 
     gmm = load_modality_model()
     if gmm is not None:
-        # 传递 AnnData 对象，由 ModalitySelector.predict() 内部提取特征
+        # 兼容两种格式：ModalitySelector 对象 或 train.py 的 dict 格式
+        if isinstance(gmm, dict):
+            model = gmm["model"]
+            cluster_to_label = gmm["cluster_to_label"]
+            features = _extract_features(adata)
+            cluster = model.predict(features)[0]
+            return cluster_to_label.get(cluster, "scrna")
         return gmm.predict(adata)
 
     # 启发式 fallback：使用 adata 原始维度信息进行判断

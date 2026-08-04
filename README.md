@@ -60,15 +60,28 @@
 
 ## 安装
 
-### 推荐方式：Conda（一键安装，含 R + kallisto + CUDA PyTorch）
+### 推荐方式：Conda（Python + PyTorch + R + rpy2）
 
 ```bash
-conda env create -f environment.yml     # 创建完整环境（~2-5 GB）
+conda env create -f environment.yml     # 创建环境（~2-5 GB）
 conda activate omics-std                # 激活
 pip install -e ".[test,dev]"            # 可编辑安装
+python train.py                         # 训练选择器模型（可选，不训练也可用 fallback）
 ```
 
-### 备选：pip + venv（仅 Python 包，不含 R/kallisto）
+### Windows 额外步骤
+
+`environment.yml` 已移除 bioconda 频道（不支持 Windows）。以下组件需手动安装：
+
+| 组件 | 用途 | Windows 安装方式 |
+|------|------|-----------------|
+| R | rpy2 桥接 | https://cran.r-project.org/bin/windows/base/ |
+| Bioconductor | TMM/DESeq2/VSN/Scran | R 中运行 `BiocManager::install(c("edgeR","DESeq2","limma","scran","SingleCellExperiment"))` |
+| kallisto | FASTQ 定量 | https://pachterlab.github.io/kallisto/download → 解压后加入 PATH |
+| pysam | BAM/SAM 解析（可选） | 需 Visual Studio Build Tools + Cython，`pip install pysam` |
+| R_HOME | rpy2 定位 R | 跑 pipeline 前执行 `$env:R_HOME = "$env:CONDA_PREFIX\Lib\R"` |
+
+### 备选：pip + venv（仅 Python 包）
 
 ```bash
 python -m venv .venv && source .venv/bin/activate   # Linux/macOS
@@ -91,16 +104,6 @@ pip install -e ".[storage]"       # MinIO + Neo4j + DM8 混合存储
 pip install -e ".[docs]"          # 文档构建
 pip install -e ".[dev,test]"      # 开发工具 + 测试
 ```
-
-### 系统级依赖（手动安装）
-
-部分功能需要额外安装系统级软件：
-
-| 依赖 | 用途 | 安装方式 |
-|------|------|----------|
-| R + Bioconductor | TMM / DESeq2 / VSN / Scran | `install.packages("BiocManager"); BiocManager::install(c("edgeR","DESeq2","limma","scran"))` |
-| kallisto | FASTQ 双端定量 | `conda install -c bioconda kallisto` 或 [官网下载](https://pachterlab.github.io/kallisto/download) |
-| DM8 客户端 | 国产数据库存储（仅 Windows，可选） | 达梦官网，SQLite 为默认后端 |
 
 ## 快速开始
 
@@ -171,7 +174,11 @@ adata = batch_correct(adata, batch_key="batch")      # 自动选择批次校正
 
 # ---- 方式 3：训练选择器模型 ----
 
-from _selectors import train_and_persist_models
+# 方法 A：命令行一键训练
+# python train.py
+
+# 方法 B：Python API
+from _selectors._persistence import train_and_persist_models
 train_and_persist_models()  # 训练并保存 GMM + RF 模型到 config/models/
 
 # ---- 方式 4：混合存储 ----
@@ -370,13 +377,14 @@ omics_standardization/
 │   ├── storage/                # 混合存储架构（MinIO + SQLite/DM8 + Neo4j）
 │   ├── _settings/              # 全局配置单例 + 日志级别
 │   ├── utils/                  # I/O 辅助 + 装饰器
-│   ├── logging.py              # 自定义日志系统
+│   ├── _logging.py             # 自定义日志系统（下划线前缀避免与 stdlib 冲突）
 │   ├── main.py                 # CLI 入口（omics-std 命令）
 │   └── _compat.py              # Python 版本兼容适配
 ├── config/
 │   ├── default.yaml            # 默认配置（所有可调参数）
 │   ├── logging.yaml            # 日志配置
 │   └── models/                 # 训练好的选择器模型（gitignored）
+├── train.py                    # 独立模型训练脚本（GMM + 3×RF → config/models/）
 ├── scripts/
 │   ├── generate_demo_data.py   # 合成 demo 数据生成器
 │   └── run_demo_pipeline.py    # demo 数据全流程验证
@@ -448,7 +456,7 @@ python -m build
 | `fcs` | `fcsparser>=0.2` | 流式细胞术 .fcs 解析 |
 | `ms` | `pymzml>=2.5` | 质谱 mzML 解析 |
 | `impute` | `magic-impute>=3.0` | MAGIC 图扩散插补 |
-| `ngs` | `pysam>=0.22` | BAM/SAM/FASTQ 解析 |
+| `ngs` | `pysam>=0.22` | BAM/SAM 解析（Windows 需手动编译） |
 | `microbiome` | `biom-format>=2.1` | BIOM 微生物组格式 |
 | `storage` | `minio>=7.2`, `neo4j>=5.20`, `dmPython>=8.0` | 混合存储后端 |
 

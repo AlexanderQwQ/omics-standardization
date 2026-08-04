@@ -118,11 +118,7 @@ class ZINBVAEImputer:
 
     def _run_torch(self, adata: AnnData, **kwargs: Any) -> AnnData:
         """内置 PyTorch ZINB-VAE 实现"""
-        try:
-            import torch
-            import torch.nn as nn
-            import torch.nn.functional as F
-        except ImportError:
+        if not _ZINB_TORCH_AVAILABLE:
             raise ImportError(
                 "ZINB-VAE 需要 PyTorch。请运行: pip install torch"
             )
@@ -216,16 +212,36 @@ class ZINBVAEImputer:
 
 
 # =============================================================================
-# 网络模块
+# 网络模块 — 仅在 torch 可用时定义
 # =============================================================================
 
-class ZINBEncoder(nn.Module):
+# 延迟导入 torch（模块顶层不应强制导入）
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    _ZINB_TORCH_AVAILABLE = True
+except ImportError:
+    torch: Any = None  # type: ignore[no-redef]
+    nn: Any = None  # type: ignore[no-redef]
+    F: Any = None  # type: ignore[no-redef]
+    _ZINB_TORCH_AVAILABLE = False
+
+if _ZINB_TORCH_AVAILABLE:
+    _ModuleBase = nn.Module
+else:
+    _ModuleBase = object
+
+
+class ZINBEncoder(_ModuleBase):
     """ZINB-VAE 编码器
 
     输出隐空间的均值 (mu) 和对数方差 (logvar)。
     """
 
     def __init__(self, input_dim: int, hidden_dim: int = 256, latent_dim: int = 32) -> None:
+        if not _ZINB_TORCH_AVAILABLE:
+            raise ImportError("ZINB-VAE 需要 PyTorch")
         super().__init__()
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -247,7 +263,7 @@ class ZINBEncoder(nn.Module):
         return mu, logvar
 
 
-class ZINBDecoder(nn.Module):
+class ZINBDecoder(_ModuleBase):
     """ZINB 解码器
 
     输出 ZINB 分布的三参数:
@@ -257,6 +273,8 @@ class ZINBDecoder(nn.Module):
     """
 
     def __init__(self, latent_dim: int, hidden_dim: int = 256, output_dim: int = 20000) -> None:
+        if not _ZINB_TORCH_AVAILABLE:
+            raise ImportError("ZINB-VAE 需要 PyTorch")
         super().__init__()
         self.decoder = nn.Sequential(
             nn.Linear(latent_dim, hidden_dim // 2),

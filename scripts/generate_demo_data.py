@@ -449,12 +449,12 @@ def write_mzml(
 
     # 每个 spectrum = 一个样本行 → m/z + intensity 对
     # m/z 值从 var_names 推断或使用均匀分布
-    mz_values = np.linspace(50.0, 1000.0, n_peaks, dtype=np.float64)
+    mz_values = np.linspace(50.0, 1000.0, n_peaks, dtype=np.float32)
 
     spectra_xml = []
     for i in range(n_spectra):
         # 只保留非零峰值
-        intensities = X[i].astype(np.float64)
+        intensities = X[i].astype(np.float32)
         nonzero_mask = intensities > 0
         if not nonzero_mask.any():
             nonzero_mask[:5] = True  # 至少保留一些峰
