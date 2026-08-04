@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .. import logging as logg
+import _logging as logg
 
 if TYPE_CHECKING:
     from anndata import AnnData

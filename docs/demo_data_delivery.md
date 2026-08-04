@@ -192,7 +192,7 @@ python -X utf8 scripts/run_demo_pipeline.py -f data/raw/scrna/scrna_expression.h
 | `parse_mzml()` | `.mzML` | XML ElementTree + base64 decode → NumPy float32 |
 | `parse_biom()` | `.biom` | JSON 解析 → COO 稀疏三元组 → CSR |
 
-**1 个启发式模态检测器**（与 `src/selectors/_modality.py` 逻辑等价）：
+**1 个启发式模态检测器**（与 `src/_selectors/_modality.py` 逻辑等价）：
 
 ```
 n_vars > 10000:

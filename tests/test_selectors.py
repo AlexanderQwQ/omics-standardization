@@ -5,9 +5,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from selectors._modality import ModalitySelector, detect_modality, _extract_features
-from selectors._strategy import StrategySelector, recommend_strategy
-from selectors._persistence import (
+from _selectors._modality import ModalitySelector, detect_modality, _extract_features
+from _selectors._strategy import StrategySelector, recommend_strategy
+from _selectors._persistence import (
     generate_training_data,
     is_model_trained,
     save_modality_model,

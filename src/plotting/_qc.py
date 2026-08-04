@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .. import logging as logg
+import _logging as logg
 
 if TYPE_CHECKING:
     from anndata import AnnData

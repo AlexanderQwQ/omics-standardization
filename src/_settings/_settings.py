@@ -130,10 +130,6 @@ class Settings:
         }
         self._root_logger.setLevel(level_map.get(value, logging.INFO))
 
-    @property
-    def _root_logger(self) -> logging.Logger:
-        return logging.getLogger("omics_std")
-
     # ------------------------------------------------------------------
     # 配置加载
     # ------------------------------------------------------------------

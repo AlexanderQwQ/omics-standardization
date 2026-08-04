@@ -173,15 +173,15 @@ from storage import StorageManager      # 混合存储
 
 ### 日志系统（Logging）
 
-自定义 `_RootLogger` ([src/logging.py](src/logging.py)) 提供便捷函数 `info()`, `warning()`, `error()`, `hint()`, `debug()`。均支持可选 `time=` 和 `deep=` 关键字参数。内部导入为 `from .. import logging as logg`。
+自定义 `_RootLogger` ([src/_logging.py](src/_logging.py)) 提供便捷函数 `info()`, `warning()`, `error()`, `hint()`, `debug()`。均支持可选 `time=` 和 `deep=` 关键字参数。内部导入为 `import _logging as logg`（扁平包结构，使用绝对导入）。
 
 ### 选择器模式（Selector Pattern — 算法自动选择）
 
-当 `config/default.yaml` 指定 `method: auto` 时，流水线委托给 selectors 模块：
+当 `config/default.yaml` 指定 `method: auto` 时，流水线委托给 _selectors 模块：
 
-- `selectors/_modality.py`：GMM 聚类在 4 特征向量 `[missing_rate, log1p(n_obs), log1p(n_vars), n_batches]` 上 — **必须与 `_persistence.py` 中的 `generate_training_data()[:, 1:5]` 对齐**。训练后 GMM 区分全部 5 种模态。无模型时启发式规则覆盖全部 5 种：ATAC 在 `n_vars > 10000` 且 `missing_rate > 0.85` 时检测，scRNA 在 `n_vars > 10000` 且 `missing_rate ≤ 0.85` 时检测。
-- `selectors/_strategy.py`：每模态 fallback 表映射 modality → `{imputation, normalization, batch}` 方法。RF 模型使用 6 个特征：`[modality_code, missing_rate, log1p(n_obs), log1p(n_vars), n_batches, file_ext_code]`。
-- `selectors/_persistence.py`：模型训练（`train_and_persist_models()`）、joblib 保存/加载、合成训练数据生成器（500 样本 × 5 模态）。模型存储在 `config/models/`。GMM 训练在 `X[:, 1:5]` 上（排除 modality_code 和 file_ext_code）。`assess_annotation_quality()` 评估训练数据质量（样本量 >100、类别平衡、模型新鲜度）。`is_high_quality_available()` 返回 True 仅当模型存在且质量评分 ≥0.7，为需求中"动态切换 GMM↔RF"提供判断依据。
+- `_selectors/_modality.py`：GMM 聚类在 4 特征向量 `[missing_rate, log1p(n_obs), log1p(n_vars), n_batches]` 上 — **必须与 `_persistence.py` 中的 `generate_training_data()[:, 1:5]` 对齐**。训练后 GMM 区分全部 5 种模态。无模型时启发式规则覆盖全部 5 种：ATAC 在 `n_vars > 10000` 且 `missing_rate > 0.85` 时检测，scRNA 在 `n_vars > 10000` 且 `missing_rate ≤ 0.85` 时检测。
+- `_selectors/_strategy.py`：每模态 fallback 表映射 modality → `{imputation, normalization, batch}` 方法。RF 模型使用 6 个特征：`[modality_code, missing_rate, log1p(n_obs), log1p(n_vars), n_batches, file_ext_code]`。
+- `_selectors/_persistence.py`：模型训练（`train_and_persist_models()`）、joblib 保存/加载、合成训练数据生成器（500 样本 × 5 模态）。模型存储在 `config/models/`。GMM 训练在 `X[:, 1:5]` 上（排除 modality_code 和 file_ext_code）。`assess_annotation_quality()` 评估训练数据质量（样本量 >100、类别平衡、模型新鲜度）。`is_high_quality_available()` 返回 True 仅当模型存在且质量评分 ≥0.7，为需求中"动态切换 GMM↔RF"提供判断依据。
 
 `detect_modality()` 和 `recommend_strategy()` 在有持久化模型时自动加载；否则回退到启发式/策略表。首次使用需运行 `train_and_persist_models()` 初始化模型目录。
 
@@ -246,8 +246,8 @@ torch（ZINB-VAE, DANN）、rpy2（TMM/DESeq2, VSN, Scran）、minio、neo4j、d
 
 - **环境文件**：`requirements.txt`（pip）和 `environment.yml`（conda）是权威依赖列表。`pyproject.toml` 镜像它们但环境文件包含系统级说明（R, kallisto, DM8）。添加新依赖时，必须同时更新三者。
 - **`scvi-tools` 位于 `torch` 可选组**：ZINB-VAE 的 scvi 模式导入 `scvi`。早期 `pyproject.toml` 缺失此项 — 现已添加。如果看到 `ImportError: scvi`，请用 `pip install -e ".[torch]"` 安装。
-- **`src/__init__.py` 在包加载时急切导入所有子模块** — 包括 `storage`, `parsers` 和 `selectors`。在其中添加新子模块导入意味着每次 `import` 包时都会执行它。保持顶级导入精简。注意 `storage._minio`, `storage._graph` 等不在包级别导入 — 仅导入 `storage`（命名空间）。
-- **`pp.normalize()` 绕过自己的选择器**：与使用自己模块级选择器的 `pp.impute()` 和 `pp.batch_correct()` 不同，`normalize()` 调用 selectors 中的全局 `recommend_strategy()`。这是故意的 — 归一化选择器依赖检测到的模态。
+- **`src/__init__.py` 在包加载时急切导入所有子模块** — 包括 `storage`, `parsers` 和 `_selectors`。在其中添加新子模块导入意味着每次 `import` 包时都会执行它。保持顶级导入精简。注意 `storage._minio`, `storage._graph` 等不在包级别导入 — 仅导入 `storage`（命名空间）。
+- **`pp.normalize()` 绕过自己的选择器**：与使用自己模块级选择器的 `pp.impute()` 和 `pp.batch_correct()` 不同，`normalize()` 调用 _selectors 中的全局 `recommend_strategy()`。这是故意的 — 归一化选择器依赖检测到的模态。
 - **`pp.normalize()` 中的方法映射**：函数通过硬编码的 `method_map` 字典将方法字符串映射到类名。添加新归一化器需要同时更新 `normalizers/__init__.py`（导出）和此字典（字符串→类映射）。
 - **存储后端自动 fallback**：`MinIOClient`, `RelationalDBClient` 和 `GraphDBClient` 在驱动缺失时均静默回退到本地存储。测试应针对 fallback 路径（基于 tmpdir），而非期望运行中的服务器。
 - **选择器模型目录**：`config/models/` 除 `.gitkeep` 外均被 gitignore。模型必须在每个环境中通过调用 `train_and_persist_models()` 重新生成。`recommend_strategy()` 和 `detect_modality()` 函数在无持久化模型时检查并使用 fallback — 它们从不会因缺失模型文件而失败。

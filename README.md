@@ -171,7 +171,7 @@ adata = batch_correct(adata, batch_key="batch")      # 自动选择批次校正
 
 # ---- 方式 3：训练选择器模型 ----
 
-from selectors import train_and_persist_models
+from _selectors import train_and_persist_models
 train_and_persist_models()  # 训练并保存 GMM + RF 模型到 config/models/
 
 # ---- 方式 4：混合存储 ----
@@ -256,7 +256,7 @@ data/processed/
 | **Harmony** | `_harmony.py` | 迭代软聚类校正 | 单细胞数据 |
 | **DANN** | `_dann.py` | 域对抗神经网络（GRL + GPU 加速 + 模式崩溃检测） | 深度学习，需要 PyTorch |
 
-## 智能选择器引擎（`selectors/`）
+## 智能选择器引擎（`_selectors/`）
 
 根据数据特征自动推荐最优处理策略，无需手动选择算法：
 
@@ -359,7 +359,7 @@ settings.verbosity = Verbosity.debug
 omics_standardization/
 ├── src/                        # 源代码（Python 包根目录）
 │   ├── parsers/                # 多模态数据解析（9 种格式 → AnnData）
-│   ├── selectors/              # 智能算法选择引擎（GMM + RF）
+│   ├── _selectors/             # 智能算法选择引擎（GMM + RF）
 │   ├── imputers/               # 缺失值分类插补（MissForest, ZINB-VAE, MAGIC）
 │   ├── normalizers/            # 尺度归一化（TMM, DESeq2, Scran, Quantile, VSN）
 │   ├── batch_correctors/       # 批次效应校正（ComBat, Harmony, DANN）
@@ -421,7 +421,7 @@ python -m build
 | `test_imputers.py` | 插补选择和 MissForest |
 | `test_normalizers.py` | TMM, DESeq2, Quantile, VSN, Scran |
 | `test_batch_correctors.py` | ComBat, Harmony, 校正选择器 |
-| `test_selectors.py` | 模态检测（GMM+启发式），策略推荐（RF+fallback），模型训练持久化 |
+| `test_selectors.py` | 模态检测（GMM+启发式），策略推荐（RF+fallback），模型训练持久化（`_selectors/`） |
 | `test_pipeline.py` | 端到端流水线、存储集成、指标评估 |
 | `test_storage.py` | MinIO, RelationalDB (SQLite), GraphDB, StorageManager |
 

@@ -21,8 +21,8 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .. import logging as logg
-from .._settings import settings
+import _logging as logg
+from _settings import settings
 
 if TYPE_CHECKING:
     from anndata import AnnData

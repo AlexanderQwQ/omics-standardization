@@ -32,7 +32,7 @@ def impute(adata: AnnData, method: str | None = None, **kwargs: Any) -> AnnData:
     Returns:
         插补后的 AnnData
     """
-    from ..imputers._selector import ImputationSelector
+    from imputers._selector import ImputationSelector
     selector = ImputationSelector()
     return selector.run(adata, method=method, **kwargs)
 
@@ -50,7 +50,7 @@ def normalize(adata: AnnData, method: str | None = None, **kwargs: Any) -> AnnDa
     """
     # 自动选择逻辑
     if method is None:
-        from ..selectors._strategy import recommend_strategy
+        from _selectors._strategy import recommend_strategy
         strategy = recommend_strategy(adata)
         method = strategy["normalization"]
 
@@ -65,7 +65,7 @@ def normalize(adata: AnnData, method: str | None = None, **kwargs: Any) -> AnnDa
     if method not in method_map:
         raise ValueError(f"未知的归一化方法: {method}，可选: {list(method_map.keys())}")
 
-    from .. import normalizers
+    import normalizers
 
     normalizer_cls = getattr(normalizers, method_map[method])
     return normalizer_cls(**kwargs).run(adata)
@@ -83,7 +83,7 @@ def batch_correct(adata: AnnData, method: str | None = None, batch_key: str = "b
     Returns:
         校正后的 AnnData
     """
-    from ..batch_correctors._selector import BatchCorrectionSelector
+    from batch_correctors._selector import BatchCorrectionSelector
     selector = BatchCorrectionSelector()
     return selector.run(adata, method=method, batch_key=batch_key, **kwargs)
 
@@ -101,7 +101,7 @@ def standardize(adata: AnnData, batch_key: str = "batch", **kwargs: Any) -> AnnD
     Returns:
         标准化后的 AnnData
     """
-    from .. import logging as logg
+    import _logging as logg
 
     logg.info("=" * 50)
     logg.info("开始标准化处理: impute → normalize → batch_correct")

@@ -230,7 +230,7 @@ def parse_mzml(path: Path):
 
 
 # ==============================================================================
-# 模态检测（独立实现，与 src/selectors/_modality.py 等价）
+# 模态检测（独立实现，与 src/_selectors/_modality.py 等价）
 # ==============================================================================
 
 MODALITY_LABELS = ["scrna", "bulk_rna", "proteomics", "metabolomics", "atac"]

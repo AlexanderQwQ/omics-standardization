@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .. import logging as logg
+import _logging as logg
 from ._base import BaseStorageClient
 
 if TYPE_CHECKING:

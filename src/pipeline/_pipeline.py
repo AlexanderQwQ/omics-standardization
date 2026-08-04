@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .. import logging as logg
-from .._settings import settings
+import _logging as logg
+from _settings import settings
 
 if TYPE_CHECKING:
     from anndata import AnnData
@@ -109,7 +109,7 @@ class StandardizationPipeline:
         logg.info("\n[Step 1/6] 解析数据...")
         self._steps.append("parse")
 
-        from ..parsers import parse_file
+        from parsers import parse_file
         return parse_file(input_path)
 
     def _step_select_strategy(self, data: AnnData) -> dict[str, str]:
@@ -117,7 +117,7 @@ class StandardizationPipeline:
         logg.info("\n[Step 2/6] 选择处理策略...")
         self._steps.append("select")
 
-        from ..selectors import recommend_strategy, detect_modality
+        from _selectors import recommend_strategy, detect_modality
         modality = detect_modality(data)
         strategy = recommend_strategy(data, modality=modality)
         self._results["strategy"] = strategy
@@ -138,7 +138,7 @@ class StandardizationPipeline:
         logg.info("\n[Step 3/6] 缺失值插补...")
         self._steps.append("impute")
 
-        from ..preprocessing import impute
+        from preprocessing import impute
 
         method = settings.imputation.get("method", "auto")
         if method == "auto":
@@ -151,7 +151,7 @@ class StandardizationPipeline:
         logg.info("\n[Step 4/6] 尺度归一化...")
         self._steps.append("normalize")
 
-        from ..preprocessing import normalize
+        from preprocessing import normalize
 
         method = settings.normalization.get("method", "auto")
         if method == "auto":
@@ -164,7 +164,7 @@ class StandardizationPipeline:
         logg.info("\n[Step 5/6] 批次校正...")
         self._steps.append("batch_correct")
 
-        from ..preprocessing import batch_correct
+        from preprocessing import batch_correct
 
         method = settings.batch_correction.get("method", "auto")
         batch_key = settings.batch_correction.get("batch_key", "batch")
@@ -178,7 +178,7 @@ class StandardizationPipeline:
         logg.info("\n[Step 6/6] 效果评估...")
         self._steps.append("evaluate")
 
-        from ..tools._evaluation import run_evaluation
+        from tools._evaluation import run_evaluation
         metrics = run_evaluation(data)
         self._results["metrics"] = metrics
 
@@ -272,7 +272,7 @@ class StandardizationPipeline:
         Returns:
             包含所有模态处理结果的合并 MuData
         """
-        from ..parsers._utils import list_supported_files
+        from parsers._utils import list_supported_files
 
         # 1. 发现全部支持文件
         all_files = list_supported_files(input_dir)
@@ -394,7 +394,7 @@ class StandardizationPipeline:
             return
 
         try:
-            from ..storage import StorageManager
+            from storage import StorageManager
 
             store = StorageManager.from_settings()
             store.connect()

@@ -20,7 +20,7 @@ import pandas as pd
 from anndata import AnnData
 
 from ._base import BaseParser
-from .. import logging as logg
+import _logging as logg
 
 if TYPE_CHECKING:
     pass

@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .. import logging as logg
+import _logging as logg
 
 if TYPE_CHECKING:
     from anndata import AnnData

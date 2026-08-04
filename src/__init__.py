@@ -17,7 +17,7 @@ from .pipeline import StandardizationPipeline
 from . import parsers
 
 # Selectors
-from . import selectors
+from . import _selectors
 
 # Storage (lazy — drivers loaded on demand)
 from . import storage
@@ -30,7 +30,7 @@ __all__ = [
     "tl",
     "pl",
     "parsers",
-    "selectors",
+    "_selectors",
     "storage",
     "StandardizationPipeline",
 ]

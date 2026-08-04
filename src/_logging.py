@@ -32,7 +32,7 @@ class _RootLogger(logging.RootLogger):
         time: datetime | None = None,
         deep: str | None = None,
     ) -> datetime:
-        from ._settings import settings
+        from _settings import settings
 
         now = datetime.now(timezone.utc)
         time_passed: timedelta | None = None if time is None else now - time
@@ -94,26 +94,39 @@ class _LogFormatter(logging.Formatter):
 # 便捷函数（供内部模块使用）
 
 
+def _emit(level: int, msg: str, *, time=None, deep=None, extra=None) -> datetime:
+    """Core logging function — writes directly to the omics_std logger."""
+    from _settings import settings
+
+    logger = logging.getLogger("omics_std")
+    now = datetime.now(timezone.utc)
+    time_passed = None if time is None else now - time
+    # deep detail shown when verbosity >= hint (3) and message is at or below current level
+    show_deep = int(settings.verbosity) >= 3
+    extra_dict = {
+        **(extra or {}),
+        "deep": deep if show_deep else None,
+        "time_passed": time_passed,
+    }
+    logger._log(level, msg, (), extra=extra_dict)
+    return now
+
+
 def error(msg: str, *, time=None, deep=None, extra=None) -> datetime:
-    from ._settings import settings
-    return settings._root_logger.error(msg, time=time, deep=deep, extra=extra)
+    return _emit(ERROR, msg, time=time, deep=deep, extra=extra)
 
 
 def warning(msg: str, *, time=None, deep=None, extra=None) -> datetime:
-    from ._settings import settings
-    return settings._root_logger.warning(msg, time=time, deep=deep, extra=extra)
+    return _emit(WARNING, msg, time=time, deep=deep, extra=extra)
 
 
 def info(msg: str, *, time=None, deep=None, extra=None) -> datetime:
-    from ._settings import settings
-    return settings._root_logger.info(msg, time=time, deep=deep, extra=extra)
+    return _emit(INFO, msg, time=time, deep=deep, extra=extra)
 
 
 def hint(msg: str, *, time=None, deep=None, extra=None) -> datetime:
-    from ._settings import settings
-    return settings._root_logger.hint(msg, time=time, deep=deep, extra=extra)
+    return _emit(HINT, msg, time=time, deep=deep, extra=extra)
 
 
 def debug(msg: str, *, time=None, deep=None, extra=None) -> datetime:
-    from ._settings import settings
-    return settings._root_logger.debug(msg, time=time, deep=deep, extra=extra)
+    return _emit(DEBUG, msg, time=time, deep=deep, extra=extra)

@@ -19,7 +19,7 @@ from anndata import AnnData
 from scipy.sparse import coo_matrix, csr_matrix
 
 from ._base import BaseParser
-from .. import logging as logg
+import _logging as logg
 
 if TYPE_CHECKING:
     pass

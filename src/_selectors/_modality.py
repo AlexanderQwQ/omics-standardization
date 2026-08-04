@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from sklearn.mixture import GaussianMixture
 
-from .. import logging as logg
+import _logging as logg
 
 if TYPE_CHECKING:
     from anndata import AnnData

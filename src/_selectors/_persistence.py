@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .. import logging as logg
+import _logging as logg
 
 if TYPE_CHECKING:
     from sklearn.mixture import GaussianMixture
@@ -460,7 +460,7 @@ def train_and_persist_models(
     """
     from ._modality import ModalitySelector
     from ._strategy import StrategySelector
-    from .._settings import settings
+    from _settings import settings
 
     logg.info("开始训练选择器模型...")
 
