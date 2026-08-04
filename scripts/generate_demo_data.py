@@ -45,6 +45,9 @@ MODALITY_CONFIG = {
         "zero_rate": 0.40,
         "label": "scRNA-seq",
         "batch_labels": ["donor_A", "donor_B"],
+        "time_points": [0, 6, 12, 24, 48],       # 免疫应答时间点 (hours)
+        "time_unit": "hour",
+        "condition": "LPS_stimulation",
     },
     "bulk_rna": {
         "n_obs": 50,
@@ -53,6 +56,9 @@ MODALITY_CONFIG = {
         "zero_rate": 0.02,
         "label": "Bulk RNA-seq",
         "batch_labels": ["control"],
+        "time_points": [0, 3, 6, 12, 24],         # 药物处理时间点 (hours)
+        "time_unit": "hour",
+        "condition": "drug_treatment",
     },
     "proteomics": {
         "n_obs": 100,
@@ -61,6 +67,9 @@ MODALITY_CONFIG = {
         "zero_rate": 0.30,
         "label": "Proteomics (FCS)",
         "batch_labels": ["panel_v1", "panel_v2"],
+        "time_points": [0, 8, 24, 72],             # 蛋白表达时间点 (hours)
+        "time_unit": "hour",
+        "condition": "cytokine_induction",
     },
     "metabolomics": {
         "n_obs": 80,
@@ -69,6 +78,9 @@ MODALITY_CONFIG = {
         "zero_rate": 0.55,    # > 0.5 以区别于 proteomics (< 0.5)
         "label": "Metabolomics",
         "batch_labels": ["run_01"],
+        "time_points": [0, 4, 12, 48],             # 代谢响应时间点 (hours)
+        "time_unit": "hour",
+        "condition": "high_fat_diet",
     },
     "atac": {
         "n_obs": 300,
@@ -77,6 +89,9 @@ MODALITY_CONFIG = {
         "zero_rate": 0.92,
         "label": "ATAC-seq",
         "batch_labels": ["tissue_lung", "tissue_liver"],
+        "time_points": [0, 24, 72],                # 染色质重塑时间点 (hours)
+        "time_unit": "hour",
+        "condition": "hypoxia_exposure",
     },
     "microbiome": {
         "n_obs": 30,
@@ -85,6 +100,9 @@ MODALITY_CONFIG = {
         "zero_rate": 0.55,
         "label": "Microbiome (BIOM)",
         "batch_labels": ["stool", "oral"],
+        "time_points": [0, 7, 30],                 # 定植时间点 (days)
+        "time_unit": "day",
+        "condition": "probiotics_intervention",
     },
 }
 
@@ -110,6 +128,9 @@ def _make_adata(
     batch_labels: list[str],
     modality_name: str,
     seed: int = 42,
+    time_points: list[float] | None = None,
+    time_unit: str = "hour",
+    condition: str = "untreated",
 ) -> "AnnData":
     """生成合成 AnnData 对象
 
@@ -121,11 +142,16 @@ def _make_adata(
         batch_labels: 批次标签
         modality_name: 模态名称（用于 var 命名）
         seed: 随机种子
+        time_points: 采样时间点列表，均匀分配给样本
+        time_unit: 时间单位 (hour/day)
+        condition: 实验条件描述
 
     Returns:
         AnnData 对象，包含:
             - .X: sparse CSR 计数矩阵
             - .obs["batch"]: 批次注释
+            - .obs["time"]: 时间点
+            - .obs["condition"]: 实验条件
             - .var 索引: 特征名
     """
     from anndata import AnnData
@@ -150,6 +176,16 @@ def _make_adata(
     # 批次分配
     batch_col = np.repeat(batch_labels[:n_batches], np.ceil(n_obs / n_batches))[:n_obs]
     rng.shuffle(batch_col)
+
+    # 时间分配：将 time_points 均匀分配给样本（模拟时间序列实验）
+    if time_points is not None:
+        n_tp = len(time_points)
+        time_col = np.repeat(time_points, np.ceil(n_obs / n_tp))[:n_obs]
+        rng.shuffle(time_col)
+    else:
+        time_col = np.zeros(n_obs)
+        time_unit = ""
+    condition_col = np.full(n_obs, condition)
 
     # 特征名（避免包含 "gene"/"sample"/"cell" 等关键词以防 CSV 布局检测误判）
     if modality_name == "scrna":
@@ -187,9 +223,17 @@ def _make_adata(
     else:
         obs_names = [f"sample_{i}" for i in range(n_obs)]
 
+    obs_dict = {
+        "batch": batch_col,
+        "time": time_col,
+        "condition": condition_col,
+    }
+    if time_points is not None:
+        obs_dict["time_unit"] = np.full(n_obs, time_unit)
+
     return AnnData(
         X=csr_matrix(X),
-        obs=pd.DataFrame({"batch": batch_col}, index=obs_names),
+        obs=pd.DataFrame(obs_dict, index=obs_names),
         var=pd.DataFrame(index=var_names),
     )
 
@@ -202,6 +246,16 @@ def write_h5ad(adata: "AnnData", path: Path) -> None:
     """写入 .h5ad 文件"""
     adata.write(path)
     print(f"  ✓ {path} ({adata.n_obs}×{adata.n_vars})")
+
+
+def write_metadata_csv(adata: "AnnData", path: Path) -> None:
+    """将 .obs 元数据写入 CSV（作为二进制格式的侧车文件）"""
+    meta_cols = [c for c in ["time", "condition", "batch", "time_unit"] if c in adata.obs.columns]
+    if not meta_cols:
+        return
+    df = adata.obs[meta_cols].copy()
+    df.to_csv(path)
+    print(f"  ✓ {path} (metadata: {meta_cols})")
 
 
 def write_csv(
@@ -236,6 +290,15 @@ def write_csv(
             index=adata.obs_names,
             columns=adata.var_names,
         )
+
+    # 注入时间/条件等元数据为前置列（保留 obs 信息）
+    meta_cols = {}
+    for col_name in ["time", "condition", "batch"]:
+        if col_name in adata.obs.columns:
+            meta_cols[col_name] = adata.obs[col_name].values
+    if meta_cols:
+        meta_df = pd.DataFrame(meta_cols, index=adata.obs_names)
+        df = pd.concat([meta_df, df], axis=1)
 
     df.to_csv(path, sep=sep)
     print(f"  ✓ {path} ({df.shape[0]}×{df.shape[1]}, layout={layout})")
@@ -273,12 +336,15 @@ def write_biom_json(
             row_entry["metadata"]["taxonomy"] = taxonomy[i % len(taxonomy)]
         rows.append(row_entry)
 
-    # 构建列（样本）元数据
+    # 构建列（样本）元数据 — 携带时间/条件信息
     columns = []
     for j in range(n_samples):
-        col_entry = {"id": str(adata.obs_names[j]), "metadata": {}}
-        if "batch" in adata.obs.columns:
-            col_entry["metadata"]["batch"] = str(adata.obs.iloc[j]["batch"])
+        col_meta = {}
+        for col_name in ["batch", "time", "condition", "time_unit"]:
+            if col_name in adata.obs.columns:
+                val = adata.obs.iloc[j][col_name]
+                col_meta[col_name] = str(val) if not isinstance(val, (int, float)) else val
+        col_entry = {"id": str(adata.obs_names[j]), "metadata": col_meta}
         columns.append(col_entry)
 
     # 构建稀疏三元组数据
@@ -584,6 +650,7 @@ def generate_all(output_root: Optional[Path] = None) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     write_fcs(adata, out_dir / "proteomics_sample.fcs")
     write_csv(adata, out_dir / "proteomics_sample.csv", layout="samples_x_genes")
+    write_metadata_csv(adata, out_dir / "proteomics_metadata.csv")
     all_adata["proteomics"] = adata
 
     # ---- Metabolomics (mzML) ----
@@ -614,6 +681,7 @@ def generate_all(output_root: Optional[Path] = None) -> None:
     out_dir = output_root / "microbiome"
     out_dir.mkdir(parents=True, exist_ok=True)
     write_biom_json(adata, out_dir / "otu_table.biom", taxonomy=TAXONOMY)
+    write_metadata_csv(adata, out_dir / "microbiome_metadata.csv")
     all_adata["microbiome"] = adata
 
     # ---- Summary ----

@@ -44,4 +44,7 @@ def list_supported_files(
     for pattern in patterns:
         files.extend(directory.rglob(f"*{pattern}"))
 
+    # 排除侧车元数据文件（名称中含 _metadata）
+    files = [f for f in files if "_metadata" not in f.stem]
+
     return sorted(files, key=lambda p: p.name)

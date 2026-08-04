@@ -54,7 +54,7 @@ def _detect_layout(df: pd.DataFrame) -> str:
     if df.shape[0] > df.shape[1] * 2:
         return "genes_x_samples"
 
-    return "genes_x_samples"  # 默认
+    return "samples_x_genes"  # 默认：样本行×基因列
 
 
 class CSVParser(BaseParser):
@@ -102,11 +102,28 @@ class CSVParser(BaseParser):
             low_memory=False,
         )
 
+        # 提取元数据列（time, condition, batch 等 → .obs）— 必须在转置前
+        _META_KEYWORDS = {"time", "condition", "batch", "time_unit", "group", "sample_id", "donor", "treatment"}
+        meta_cols = []
+        for c in df.columns:
+            c_lower = str(c).lower().strip()
+            if c_lower in _META_KEYWORDS:
+                meta_cols.append(c)
+
+        obs_df = pd.DataFrame(index=df.index.tolist())
+        if meta_cols:
+            for mc in meta_cols:
+                obs_df[mc] = df[mc].values
+            df = df.drop(columns=meta_cols)
+            logg.hint(f"检测到元数据列 {meta_cols}，移至 .obs")
+
         # 检测布局
         layout = self._layout or _detect_layout(df)
 
-        if layout == "samples_x_genes":
-            # 转置为 基因×样本（AnnData 期望：obs=样本, var=基因）
+        # AnnData 期望 X 为 (n_obs, n_vars) = (样本, 基因)
+        # samples_x_genes: 样本行×基因列 → 不需要转置
+        # genes_x_samples: 基因行×样本列 → 需要转置
+        if layout == "genes_x_samples":
             df = df.T
 
         # 确保数值类型
@@ -124,7 +141,7 @@ class CSVParser(BaseParser):
 
         return AnnData(
             X=csr_matrix(X.astype(np.float32)),
-            obs=pd.DataFrame(index=df.index.tolist()),
+            obs=obs_df,
             var=pd.DataFrame(index=df.columns.tolist()),
             uns={
                 "source_format": self.file_path.suffix.lower(),

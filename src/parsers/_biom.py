@@ -123,31 +123,43 @@ class BIOMParser(BaseParser):
             # 密集格式
             X = np.array(matrix_data, dtype=np.float32).T  # 转置：原始是 feature × sample
 
-        # 构建 AnnData
-        adata = AnnData(
-            X=X,
-            obs=pd.DataFrame(
-                sample_metadata if sample_metadata else None,
-                index=sample_ids if sample_metadata else sample_ids,
-            ),
-            var=pd.DataFrame(
-                feature_metadata if feature_metadata else None,
-                index=feature_ids if feature_metadata else feature_ids,
-            ),
-        )
+        # 构建 obs — 从 BIOM 列元数据提取时间/条件/批次信息
+        if sample_metadata:
+            obs_df = pd.DataFrame.from_dict(sample_metadata, orient="index")
+            # 确保索引名与 X 的行数一致
+            obs_df = obs_df.reindex(sample_ids)
+        else:
+            obs_df = pd.DataFrame(index=sample_ids)
 
-        # 整理分类层级 (taxonomy)
-        taxonomy = data.get("rows", [{}])
-        tax_cols: dict[str, list[str]] = {}
-        for i, row in enumerate(taxonomy):
-            tax = row.get("metadata", {}).get("taxonomy", [])
-            if tax:
-                for level_idx, name in enumerate(tax):
-                    col = f"tax_{level_idx}"
-                    tax_cols.setdefault(col, [""] * len(feature_ids))[i] = name
+        # 构建 var — 排除包含列表值的列（h5py 不支持序列化）
+        if feature_metadata:
+            var_df = pd.DataFrame.from_dict(feature_metadata, orient="index")
+            var_df = var_df.reindex(feature_ids)
+            for col in list(var_df.columns):
+                try:
+                    if var_df[col].apply(lambda x: isinstance(x, list)).any():
+                        del var_df[col]
+                except Exception:
+                    pass
+        else:
+            var_df = pd.DataFrame(index=feature_ids)
 
-        for col, values in tax_cols.items():
-            adata.var[col] = values
+        adata = AnnData(X=X, obs=obs_df, var=var_df)
+
+        # 整理分类层级 (taxonomy) — 存为分层字符串列，从 var 中移除原始列表
+        if "taxonomy" in adata.var.columns:
+            taxonomy_series = adata.var["taxonomy"]
+            adata.uns["taxonomy"] = taxonomy_series.tolist()
+            taxonomy_list = taxonomy_series.tolist()
+            del adata.var["taxonomy"]
+            # 将每层分类存为独立字符串列
+            max_depth = max((len(t) for t in taxonomy_list if isinstance(t, list)), default=0)
+            for level_idx in range(max_depth):
+                col_name = f"tax_{level_idx}"
+                adata.var[col_name] = [
+                    t[level_idx] if isinstance(t, list) and level_idx < len(t) else ""
+                    for t in taxonomy_list
+                ]
 
         adata.uns["biom_metadata"] = {
             "format": data.get("format", "Biological Observation Matrix 1.0.0"),
@@ -207,16 +219,29 @@ class BIOMParser(BaseParser):
             except Exception:
                 pass
 
+        # 构建 obs — 从 BIOM 列元数据提取信息
+        if sample_meta:
+            obs_df = pd.DataFrame.from_dict(sample_meta, orient="index")
+            obs_df = obs_df.reindex(sample_ids)
+        else:
+            obs_df = pd.DataFrame(index=sample_ids)
+        # 构建 var — 排除包含列表值的列
+        if feature_meta:
+            var_df = pd.DataFrame.from_dict(feature_meta, orient="index")
+            var_df = var_df.reindex(feature_ids)
+            for col in list(var_df.columns):
+                try:
+                    if var_df[col].apply(lambda x: isinstance(x, list)).any():
+                        del var_df[col]
+                except Exception:
+                    pass
+        else:
+            var_df = pd.DataFrame(index=feature_ids)
+
         adata = AnnData(
             X=csr_matrix(X.astype(np.float32)),
-            obs=pd.DataFrame(
-                sample_meta if sample_meta else None,
-                index=sample_ids if sample_meta else sample_ids,
-            ),
-            var=pd.DataFrame(
-                feature_meta if feature_meta else None,
-                index=feature_ids if feature_meta else feature_ids,
-            ),
+            obs=obs_df,
+            var=var_df,
         )
 
         logg.info(f"BIOM 解析完成: {adata.n_obs} 样本, {adata.n_vars} OTU/特征")

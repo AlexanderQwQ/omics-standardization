@@ -318,6 +318,17 @@ class StandardizationPipeline:
 
             try:
                 data = self._step_parse(file_path)
+
+                # 合并侧车 metadata.csv（如存在）
+                meta_csv = file_path.parent / f"{modality}_metadata.csv"
+                if meta_csv.exists():
+                    import pandas as pd
+                    meta_df = pd.read_csv(meta_csv, index_col=0)
+                    for col in meta_df.columns:
+                        if col not in data.obs.columns:
+                            data.obs[col] = meta_df[col]
+                    logg.info(f"  已合并侧车元数据: {meta_csv.name}")
+
                 self._step_select_strategy(data)
                 data = self._step_impute(data)
                 data = self._step_normalize(data)
@@ -350,11 +361,14 @@ class StandardizationPipeline:
         from mudata import MuData
 
         if isinstance(combined, MuData):
-            combined.write(str(combined_out.with_suffix(".h5mu")))
+            try:
+                combined.write(str(combined_out.with_suffix(".h5mu")))
+                logg.info(f"汇总 MuData 已保存至 {combined_out}.h5mu")
+            except Exception as exc:
+                logg.warning(f"汇总 MuData 保存失败 ({exc})，各模态文件仍可用")
 
         logg.info(f"\n{'=' * 60}")
         logg.info(f"批量处理完成: {len(results)}/{n_total} 种模态成功")
-        logg.info(f"汇总 MuData 已保存至 {combined_out}.h5mu")
         logg.info(f"{'=' * 60}")
 
         return combined

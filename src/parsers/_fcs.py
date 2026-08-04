@@ -44,11 +44,16 @@ class FCSParser(BaseParser):
             obs=pd.DataFrame(index=[f"cell_{i}" for i in range(data.shape[0])]),
         )
 
-        # 保存通道元数据（确保无 bytes 值，h5py 不支持序列化 bytes）
+        # 保存通道元数据（确保无 bytes/非字符串值，h5py 不支持）
         adata.var["channel"] = [str(c) for c in data.columns]
-        adata.uns["fcs_metadata"] = {
-            str(k): (v.decode("utf-8", errors="replace") if isinstance(v, bytes) else str(v))
-            for k, v in (meta if isinstance(meta, dict) else {}).items()
-        }
+        safe_meta = {}
+        for k, v in (meta if isinstance(meta, dict) else {}).items():
+            if isinstance(v, bytes):
+                safe_meta[str(k)] = v.decode("utf-8", errors="replace")
+            elif isinstance(v, (str, int, float, bool)):
+                safe_meta[str(k)] = v
+            else:
+                safe_meta[str(k)] = str(v)
+        adata.uns["fcs_metadata"] = safe_meta
 
         return adata
