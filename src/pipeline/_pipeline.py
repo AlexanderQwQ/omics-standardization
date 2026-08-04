@@ -319,14 +319,14 @@ class StandardizationPipeline:
             try:
                 data = self._step_parse(file_path)
 
-                # 合并侧车 metadata.csv（如存在）
+                # 合并侧车 metadata.csv（如存在，忽略索引对齐）
                 meta_csv = file_path.parent / f"{modality}_metadata.csv"
                 if meta_csv.exists():
                     import pandas as pd
                     meta_df = pd.read_csv(meta_csv, index_col=0)
                     for col in meta_df.columns:
                         if col not in data.obs.columns:
-                            data.obs[col] = meta_df[col]
+                            data.obs[col] = meta_df[col].values
                     logg.info(f"  已合并侧车元数据: {meta_csv.name}")
 
                 self._step_select_strategy(data)
@@ -337,9 +337,11 @@ class StandardizationPipeline:
 
                 results[modality] = data
 
-                # 保存单模态结果
-                if per_modality_subdir:
+                # 保存单模态结果（避免嵌套：输出目录已含模态名时跳过）
+                if per_modality_subdir and output_dir.name != modality:
                     modality_out = output_dir / modality / file_path.stem
+                elif per_modality_subdir:
+                    modality_out = output_dir / file_path.stem
                 else:
                     modality_out = output_dir / modality
                 self._save(data, modality_out, use_storage=use_storage)
